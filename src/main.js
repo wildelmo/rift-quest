@@ -10,9 +10,9 @@ try { view = new View($('viewport')); }
 catch (error) { $('xr-status').textContent = `3D graphics could not start: ${error.message}. Enable hardware acceleration and reload.`; $('enter-xr').disabled = true; $('practice').disabled = true; throw error; }
 const settings = { distance: 1.98, width: 3.8 };
 let playing = false, paused = false, xrSession = null, needsPlacement = false, lastPose = null;
-let message = null, messageUntil = 0, lastTime = 0, uiClock = 0, endTime = 0, fixedAccumulator = 0;
+let pendingResult=null;let message = null, messageUntil = 0, lastTime = 0, uiClock = 0, endTime = 0, fixedAccumulator = 0;
 const keys = new Set(), previousButtons = new Map();
-function resetGame() { game.reset(); view.clear(); message = null; fixedAccumulator = 0; }
+function resetGame() { pendingResult=null;sound.reset?.();game.reset(); view.clear(); message = null; fixedAccumulator = 0; }
 function startDesktop() { resetGame(); playing = true; paused = false; document.body.classList.add('playing'); $('shell').hidden = true; $('game-ui').hidden = false; $('overlay').hidden = true; view.desktop(); sound.start().catch(() => {}); }
 function setPaused(value) { paused = value; keys.clear(); fixedAccumulator = 0; if (!xrSession) { $('overlay').hidden = !paused; if(paused) { $('overlay-label').textContent='FLIGHT SYSTEMS';$('overlay-title').textContent='Paused';$('overlay-copy').textContent='Take a breath. The invasion can wait.';$('resume').hidden=false; } } }
 function returnHome() { if(xrSession) { xrSession.end(); return; } sound.update(false,0,0);playing=false; paused=false;keys.clear();$('shell').hidden=false;$('game-ui').hidden=true;$('overlay').hidden=true;document.body.classList.remove('playing');view.desktop(); }
@@ -65,7 +65,7 @@ function readInput(dt,now){
   const trigger=rising('trigger',input.fire),pause=rising('pause',b(right,5)),recenter=rising('recenter',b(left,4));
   if(pause&&game.state==='playing')setPaused(!paused);
   if(recenter){setPaused(true);needsPlacement=true;}
-  if(game.state!=='playing'){if(trigger&&now>endTime+1.5){resetGame();paused=false;}return{};}
+  if(game.state!=='playing'){if(trigger&&now>endTime+(game.state==='won'?4.5:1.5)&&!view.cinematics.some(c=>c.kind==='death')){resetGame();paused=false;}return{};}
   if(paused){
     if(Math.abs(input.x)+Math.abs(input.y)>.1){settings.width=clamp(settings.width+input.x*dt,2.4,5.4);settings.distance=clamp(settings.distance+input.y*dt*.45,1.52,2.44);if(lastPose)view.place(lastPose,settings);}
     if(trigger&&!needsPlacement){paused=false;message={title:'DEFEND THIS REALITY',subtitle:'Your ship is the small mint light on the left.'};messageUntil=now+3;}
@@ -86,17 +86,19 @@ function handleEvents(now){for(const e of game.drainEvents()){
   if(e.type==='bomb'||e.type==='charge')haptic(.8,220);
   if(e.type==='end'){
     endTime=now;let best=game.score;try{best=Math.max(game.score,Number(localStorage.getItem('rift-best')||0));localStorage.setItem('rift-best',best);}catch{}
-    if(!xrSession){$('overlay').hidden=false;$('overlay-label').textContent=e.won?'ROOM SECURED / LEVEL COMPLETE':'INTERCEPTOR OFFLINE';$('overlay-title').textContent=e.won?'Cathedral down.':'Signal lost.';$('overlay-copy').textContent=`${game.score.toLocaleString()} points · ${game.kills} targets · Best ${best.toLocaleString()}. ${e.won?'Your living room is yours again.':'Try a charged lance or pulse bomb when the swarm closes in.'}`;$('resume').hidden=true;}
+    if(!xrSession){pendingResult={won:e.won,best,at:now+(e.won?4.5:1.2)};}
   }
 }}
-function updateDOM(now){const p=game.player;$('score').textContent=String(game.score).padStart(6,'0');$('hull').textContent='▰ '.repeat(Math.max(0,p.hp))+'▱ '.repeat(Math.max(0,5-p.hp));$('weapon').textContent=`${p.weapon} / ${p.level}${p.echo?' + ECHO':''}${p.shield?` · SHIELD ${p.shield}`:''}`;$('bombs').textContent=String(game.bombs).padStart(2,'0');$('stage').textContent=game.boss?`${game.boss.type.toUpperCase()} / PHASE ${game.boss.phase}`:`THE GLASS TIDE / ${Math.floor(game.time/60)}:${String(Math.floor(game.time%60)).padStart(2,'0')}`;$('toast').textContent=now<messageUntil?message?.title||'':'';}
+function showResult(){const e=pendingResult,best=e.best;pendingResult=null;{ $('overlay').hidden=false;$('overlay-label').textContent=e.won?'ROOM SECURED / LEVEL COMPLETE':'INTERCEPTOR OFFLINE';$('overlay-title').textContent=e.won?'Cathedral down.':'Signal lost.';$('overlay-copy').textContent=`${game.score.toLocaleString()} points · ${game.kills} targets · Best ${best.toLocaleString()}. ${e.won?'Your living room is yours again.':'Try a charged lance or pulse bomb when the swarm closes in.'}`;$('resume').hidden=true;}
+}
+function updateDOM(now){const p=game.player;$('charge-meter').value=p.charge;$('chain').textContent='×'+game.combo.toFixed(1);$('score').textContent=String(game.score).padStart(6,'0');$('hull').textContent='▰ '.repeat(Math.max(0,p.hp))+'▱ '.repeat(Math.max(0,5-p.hp));$('weapon').textContent=`${p.weapon} / ${p.level}${p.echo?' + ECHO':''}${p.shield?` · SHIELD ${p.shield}`:''}`;$('bombs').textContent=String(game.bombs).padStart(2,'0');$('stage').textContent=game.boss?`${game.boss.type.toUpperCase()} / PHASE ${game.boss.phase}`:`${['','GLASS RAIN','COPPER FOUNDRY','HEART OF THE MACHINE'][game.act]} / ${Math.floor(game.time/60)}:${String(Math.floor(game.time%60)).padStart(2,'0')}`;$('toast').textContent=now<messageUntil?message?.title||'':'';}
 view.renderer.setAnimationLoop((ms,frame)=>{
   const now=ms/1000,dt=Math.min(.05,lastTime?now-lastTime:0);lastTime=now;
   if(playing){
     if(xrSession&&frame){const pose=frame.getViewerPose(view.renderer.xr.getReferenceSpace());if(pose){lastPose=pose;if(needsPlacement){view.place(pose,settings);needsPlacement=false;}}else if(!paused)setPaused(true);}
     const input=readInput(dt,now);
     if(!paused&&game.state==='playing') {fixedAccumulator+=dt;while(fixedAccumulator>=1/90){game.update(1/90,input);fixedAccumulator-=1/90;}}else fixedAccumulator=0;
-    handleEvents(now);sound.update(!paused&&game.state==='playing',game.boss?.phase||0,game.player.charge);view.update(game,paused?0:dt,now);
+    handleEvents(now);if(pendingResult&&now>=pendingResult.at&&(!pendingResult.won||!view.cinematics.some(c=>c.kind==='death')))showResult();sound.update(!paused&&game.state==='playing',game.boss?.phase||0,game.player.charge,game.act);view.update(game,paused?0:dt,now);
     if(now-messageUntil>0)message=null;
     view.hudUpdate(game,!!xrSession,paused,message,settings);
     uiClock+=dt;if(uiClock>.1){updateDOM(now);uiClock=0;}

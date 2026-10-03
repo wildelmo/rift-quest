@@ -1,15 +1,38 @@
 # Independent quality review
 
-The user asked for a review agent to grade the game against a modern bullet-hell side-scroller, including sound, animation, spectacle, and challenge. The agent reviewed sources, actual generated renders, and deterministic simulations. It did not listen to audio or play on physical Quest hardware.
+The user asked for an independent agent to judge RIFT against a modern bullet-hell side-scroller and to keep iterating until the agent rated the result at least 9/10.
 
-| Revision | Overall assessment | Main findings |
+## Final assessment — October 3, 2026
+
+**9.0/10 for the verified web build, provisional.** The independent quality_review agent reported a weighted score of **9.035**, rounded to 9.0. It found no remaining must-fix software defect in the reviewed build.
+
+| Category | Weight | Score |
 | --- | --- | --- |
-| Initial implementation | 2/10 | Generic primitive models, sparse attacks, minimal particles and oscillator chirps. 75 hostile bullets at peak; average 13.1 in a four-minute invincible firing probe. |
-| First rebuild | 5.5–6/10 | Much stronger models, glow, particles and layered audio code. Overlapping attack density was excessive and pacing abrupt; both bosses remained too similar. |
-| Authored pacing and encounter pass | 6.5–7/10, provisional | Dense readable patterns, controlled attack windows, recovery beats, distinct gunship and Cathedral, visibly changing mechanisms. No must-fix source blocker for prototype publication. |
+| Art and readability | 25% | 9.1 |
+| Combat and level design | 25% | 9.2 |
+| Animation and impact | 20% | 9.1 |
+| Audio implementation and output | 15% | 8.5, unlistened |
+| Interface and reliability | 15% | 9.1 |
 
-The same reactive dodge policy that previously died at 55–70 seconds completed seed 42 in 222 seconds with 5 hull / 3 bombs, completed seed 101 in 217 seconds with 4 hull / 2 bombs, and remained alive at 240 seconds fighting the Cathedral on seed 23 with 4 hull / 2 bombs. This demonstrates complete navigable routes in two runs; it does not replace human playtesting.
+The reviewer inspected actual scene captures and sequential frames from the final correctly composited motion recording. It identified the bespoke Leviathan, rotating forge Procession, and smooth Helix as distinct depth set pieces; confirmed visibly changing boss mechanisms, electric beams, exact collision boundaries, and destruction preserving battle damage; and judged the boss phases to require different movement decisions with deliberate recovery windows.
 
-The current invincible firing benchmark peaks at 229 hostile bullets. Active ordinary combat averages 93.3; there are 83 bullets at ten seconds. All 15 simulation tests pass. Actual isolated desktop scene checks report no JavaScript errors and roughly 180–205 draw calls in the tested scenes.
+## Evidence and limits
 
-Remaining priorities: listen to the busiest actual mix, play and measure frame time on Quest 3, and continue refining the art direction beyond procedural models. The reviewer explicitly judged the revision an improved playable prototype, not a finished premium 2026 game. Scores are subjective and provisional, especially audio and mixed reality.
+- All 20 simulation tests passed independently.
+- Three seeded progression probes reached all acts and set pieces.
+- Every boss phase was held at fixed health for 30 seconds from starting heights -2, 0, and +2. All 18 reactive navigation probes survived at full hull, without firing, bombs, or artificial invulnerability. These demonstrate routes; they are not human difficulty ratings.
+- The final staged motion capture reported zero JavaScript errors, and verified pause/restart and results appearing only after complete destruction. The capture deliberately skips forward between scenes and uses invulnerability; it is not a complete human playthrough.
+- Sampled staged scenes reported up to 239 draw calls and 163,238 triangles. This is scene complexity on the tested desktop renderer, not a Quest frame-rate measurement or a universal worst-case bound.
+- The busy 15.96-second audio audition included rapid upgraded fire, simultaneous kills, beam warning/fire, bomb, boss collapse, and victory. Peak was 0.6777, RMS 0.06179, with zero clipped samples at 48 kHz. Voice limits and music ducking were reviewed.
+
+**The agent did not listen to the audio or physically play on Quest.** This grade does not certify headset performance, comfort, controller feel, passthrough readability, subjective sound quality, or a finished commercial release. Those remain the next validation priorities. No background art or off-plane combat hazards were added.
+
+## Iteration history
+
+| Revision | Independent assessment | Main findings |
+| --- | --- | --- |
+| Initial prototype | 2/10 | Generic primitives, sparse attacks, minimal effects. |
+| First rebuild | 5.5–6/10 | Stronger effects, but excessive overlapping attacks and similar bosses. |
+| Pacing and encounter pass | 6.5–7/10 | Controlled attack windows and distinct bosses; art and output verification remained weak. |
+| Sculpted art, staged destruction, PCM audio | 8.5/10 | Strong finish; repeated flybys and insufficient phase identities held the score back. |
+| Bespoke spatial set pieces and authored boss phases | 9.0/10, provisional | Distinct visual identity, coherent phase choreography, protected reading beats, measured busy mix, and verified motion/lifecycle. |
