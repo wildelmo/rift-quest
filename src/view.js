@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { placeArena } from './room.js';
 import { Art } from './sculpt.js';
 import { KEYLINE, projectileStyle } from './contrast.js';
 const MINT = 0xb4ffe2, ORANGE = 0xff7545, DARK = 0x183b36, WHITE = 0xeaf5df;
@@ -124,14 +125,14 @@ export class View {
     if(this.pausePanel.visible&&menu)this.paintPanel(this.pausePanel,JSON.stringify(menu)+settings.difficulty,(c,w,h)=>{
       c.fillStyle='#102019f2';c.fillRect(0,0,w,h);c.strokeStyle='#729b85';c.lineWidth=3;c.strokeRect(2,2,w-4,h-4);
       c.textAlign='left';c.fillStyle='#ff9468';c.font='bold 54px monospace';c.fillText('RIFT / FLIGHT SYSTEMS',64,85);
-      c.fillStyle='#a9c4b6';c.font='28px monospace';c.fillText('PAUSED · '+settings.difficulty.toUpperCase()+' · '+(settings.controls==='motion'?'CONTROLLER AIM':'THUMBSTICK'),64,137);
+      c.fillStyle='#a9c4b6';c.font='28px monospace';c.fillText(menu.tracking==='recenter'?'ROOM TRACKING CHANGED · X TO RECENTER':menu.tracking==='lost'?'ROOM TRACKING LOST · WAIT FOR TRACKING':'PAUSED · '+settings.difficulty.toUpperCase()+' · '+(settings.controls==='motion'?'CONTROLLER AIM':'THUMBSTICK'),64,137);
       for(let i=0;i<menu.rows.length;i++){
         const row=menu.rows[i],y=178+i*74,selected=i===menu.selected;
         if(selected){c.fillStyle='#b4ffe2';c.fillRect(40,y,w-80,66);}
         c.fillStyle=selected?'#102019':row.id==='exit'?'#ffa17c':'#e1f5e9';c.font='bold 38px monospace';c.fillText((selected?'› ':'  ')+row.label,64,y+46);
         c.textAlign='right';c.font='36px monospace';c.fillText(row.value,w-72,y+46);c.textAlign='left';
       }
-      c.fillStyle='#a9c4b6';c.font='26px monospace';c.fillText('LEFT STICK ↑↓ SELECT / ←→ ADJUST',64,1030);c.fillText('RIGHT TRIGGER CONFIRM · B RESUME · X RECENTER',64,1078);c.font='22px monospace';c.fillText('AIM: POINT RIGHT HAND · HOLD RIGHT STICK TO HOLD SHIP',64,1120);
+      c.fillStyle='#a9c4b6';c.font='26px monospace';c.fillText('LEFT STICK ↑↓ SELECT / ←→ ADJUST',64,1030);c.fillText('RIGHT TRIGGER CONFIRM · B RESUME · X RECENTER',64,1078);c.font='22px monospace';c.fillText(menu.deploying?'LOOK STRAIGHT AHEAD · RIGHT TRIGGER CENTERS THE ARENA AND DEPLOYS':'AIM: POINT RIGHT HAND · HOLD RIGHT STICK TO HOLD SHIP',64,1120);
     });
     const p=game.player;this.message.position.y=paused||game.state!=='playing'?.4:4.05;this.message.scale.setScalar(paused||game.state!=='playing'?1:.60); this.hud.visible=xr; this.message.visible=xr && !paused && ( game.state==='lost' || (game.state==='won'&&!this.cinematics.some(c=>c.kind==='death')) || (game.state==='playing'&&!!message)); this.corners.visible=!xr || paused;
     if (xr) this.paintPanel(this.hud,`${p.hp}/${p.shield}/${p.weapon}/${p.level}/${p.echo}/${p.vector}/${p.missiles}/${game.bombs}/${game.score}/${Math.floor(p.charge*10)}`,c=>{
@@ -256,7 +257,7 @@ export class View {
     this.tether.position.copy(start).add(end).multiplyScalar(.5);this.tether.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),direction.normalize());this.tether.scale.set(1,length,1);const color=cue.clutch?0xe6fff6:cue.valid?0x86e8ff:0xffb861;this.tetherCore.material.color.setHex(color);this.pointerColor.color.setHex(color);if(this.pointerMark.visible)this.pointerMark.position.set(cue.point.x,cue.point.y,0);
   }
   resize(){if(this.renderer.xr.isPresenting)return;this.renderer.setSize(innerWidth,innerHeight);this.camera.aspect=innerWidth/innerHeight;this.camera.position.set(0,0,Math.max(13.8,9.2/this.camera.aspect/Math.tan(21*Math.PI/180)));this.camera.updateProjectionMatrix();}
-  place(pose,settings){const q=new THREE.Quaternion().fromArray(pose.transform.orientation? [pose.transform.orientation.x,pose.transform.orientation.y,pose.transform.orientation.z,pose.transform.orientation.w]:[0,0,0,1]);const forward=new THREE.Vector3(0,0,-1).applyQuaternion(q);forward.y=0;forward.normalize();const pos=pose.transform.position;this.root.scale.setScalar(settings.width/16);this.root.position.set(pos.x+forward.x*settings.distance,Math.max(settings.width*9/32+.15,pos.y-.12),pos.z+forward.z*settings.distance);this.root.rotation.set(0,Math.atan2(-forward.x,-forward.z),0);}
+  place(pose,settings){return placeArena(this.root,pose,settings);}
   desktop(){this.root.scale.setScalar(1);this.root.position.set(0,0,0);this.root.rotation.set(0,0,0);this.resize();}
   render(time,playing){if(playing){this.renderer.setScissorTest(false);this.renderer.render(this.scene,this.camera);}else{
     this.renderer.setScissorTest(false);this.renderer.clear();const rect=document.querySelector('.preview-space').getBoundingClientRect();if(rect.bottom<0||rect.top>innerHeight)return;

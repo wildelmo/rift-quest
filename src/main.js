@@ -1,4 +1,5 @@
 import './style.css';
+import { RoomLock } from './room.js';
 import { MotionPilot, stickAxis } from './motion.js';
 import { Game } from './game.js';
 import { View } from './view.js';
@@ -11,10 +12,11 @@ const game = new Game(), sound = new Sound(), menu = new PauseMenu();
 let view;
 try { view = new View($('viewport')); }
 catch (error) { $('xr-status').textContent = `3D graphics could not start: ${error.message}. Enable hardware acceleration and reload.`; $('enter-xr').disabled = true; $('practice').disabled = true; throw error; }
+const roomLock=new RoomLock(view.root,{onLost:()=>setPaused(true),onChange:()=>{motionPilot.reset();motionCue=null;lastPose=null;}});
 let storedSettings;
 try { storedSettings = JSON.parse(localStorage.getItem('rift-settings')); } catch {}
 const settings = normalizeSettings(storedSettings);
-let playing = false, paused = false, xrSession = null, needsPlacement = false, lastPose = null;
+let playing = false, paused = false, xrSession = null, needsPlacement = false, lastPose = null, deploymentPending = false;
 let exiting = false, exitPromise = null, loopRunning = false, frameCount = 0;
 let pendingResult = null, message = null, messageUntil = 0, lastTime = 0, uiClock = 0, endTime = 0, fixedAccumulator = 0;
 const keys = new Set(), previousButtons = new Map();
@@ -34,7 +36,7 @@ function applySettings(roomFit = false) {
   }
   $('difficulty-hint').textContent = DIFFICULTIES[settings.difficulty].hint;
   try { localStorage.setItem('rift-settings', JSON.stringify(settings)); } catch {}
-  if (roomFit && xrSession && lastPose && paused) view.place(lastPose, settings);
+  if (roomFit && xrSession && lastPose && paused) placeRoom(lastPose);
 }
 applySettings();
 function startLoop() { if (exiting || document.hidden || loopRunning) return; lastTime = 0; loopRunning = true; if(view.renderer.xr.isPresenting)view.renderer.xr.setAnimationLoop(animate);else view.renderer.setAnimationLoop(animate); }
@@ -56,16 +58,18 @@ function setPaused(value) {
     if (paused) { $('overlay-label').textContent = 'FLIGHT SYSTEMS'; $('overlay-title').textContent = 'Paused'; $('overlay-copy').textContent = 'Take a breath. Tune your flight.'; $('resume').hidden = game.state !== 'playing'; }
   }
 }
+function placeRoom(pose){if(!view.place(pose,settings))return false;roomLock.placed(!deploymentPending);motionPilot.reset();motionCue=null;return true;}
 function resumeGame() {
   if (exiting) return;
   if (game.state !== 'playing') resetGame();
-  if (needsPlacement) return;
+  if (needsPlacement||roomLock.requiresRecenter||roomLock.lost||(xrSession&&!lastPose)) return;
+  if(xrSession&&deploymentPending){if(!lastPose||!placeRoom(lastPose))return;deploymentPending=false;roomLock.placed();}
   setPaused(false);
 }
 function restartGame() {
   if (exiting) return;
   if (!xrSession) { startDesktop(); return; }
-  resetGame(); setPaused(false);
+  resetGame(); resumeGame();
 }
 function returnHome() {
   if (exiting) return;
@@ -82,7 +86,7 @@ function exitGame({ sessionEnded = false, navigate = true, closeWindow = true } 
   exiting = true; playing = false; paused = true; pendingResult = null;
   keys.clear(); previousButtons.clear(); stopLoop();
   $('overlay').hidden = true; $('shell').hidden = true; $('game-ui').hidden = true;
-  const session = xrSession; xrSession = null; lastPose = null; needsPlacement = false;
+  const session = xrSession; xrSession = null; lastPose = null; needsPlacement = false; deploymentPending=false;roomLock.dispose();
   const audioClosed = sound.dispose();
   exitPromise = (async () => {
     await Promise.allSettled([audioClosed, session && !sessionEnded ? Promise.resolve().then(()=>session.end()) : Promise.resolve()]);
@@ -138,7 +142,7 @@ $('enter-xr').addEventListener('click', async () => {
   let session;
   try {
     // Never replace the user's real room with an opaque VR backdrop.
-    session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'] });
+    session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'],optionalFeatures:['anchors'] });
     if (exiting) { await session.end(); return; }
     xrSession = session;
     session.addEventListener('end', () => { if (xrSession === session && !exiting) exitGame({ sessionEnded: true }); });
@@ -149,15 +153,16 @@ $('enter-xr').addEventListener('click', async () => {
     session.addEventListener('inputsourceschange', () => { previousButtons.clear(); if (playing) setPaused(true); });
     await view.renderer.xr.setSession(session);
     if (exiting) return;
+    roomLock.connect(view.renderer.xr.getReferenceSpace());
     view.renderer.setClearColor(0x000000, 0); view.scene.background = null;
-    resetGame(); playing = true; paused = true; needsPlacement = true; menu.open();
+    resetGame(); playing = true; paused = true; needsPlacement = true; deploymentPending=true;menu.open();
     document.body.classList.add('xr'); $('shell').hidden = true; $('game-ui').hidden = true; $('overlay').hidden = true;
     sound.suspend(); startLoop();
   } catch (error) {
     // Entry failure is recoverable. Ignore the expected end event while unwinding.
     if (session && !exiting) { xrSession = null; await session.end().catch(() => {}); }
     if (exitPromise) return;
-    xrSession = null; document.body.classList.remove('xr'); returnHome(); startLoop();
+    roomLock.dispose();xrSession = null;deploymentPending=false;needsPlacement=false;lastPose=null; document.body.classList.remove('xr'); returnHome(); startLoop();
     $('xr-status').textContent = `Could not enter mixed reality: ${error.message}. Check headset permissions and try again.`; $('enter-xr').disabled = false;
   }
 });
@@ -217,7 +222,7 @@ function animate(ms,frame){
   if(exiting||!loopRunning)return;frameCount++;
   const now=ms/1000,dt=Math.min(.05,lastTime?now-lastTime:0);lastTime=now;
   if(playing){
-    if(xrSession&&frame){const pose=frame.getViewerPose(view.renderer.xr.getReferenceSpace());if(pose){lastPose=pose;if(needsPlacement){view.place(pose,settings);needsPlacement=false;}}else if(!paused)setPaused(true);}
+    if(xrSession&&frame){const space=view.renderer.xr.getReferenceSpace(),pose=frame.getViewerPose(space);if(pose&&!pose.emulatedPosition){lastPose=pose;if(needsPlacement&&placeRoom(pose))needsPlacement=false;roomLock.update(frame,space);}else{lastPose=null;if(!paused)setPaused(true);}}
     const input=readInput(dt,now,frame);
     if(exiting)return;
     if(!paused&&game.state==='playing'){fixedAccumulator+=dt;while(fixedAccumulator>=1/90){game.update(1/90,input);fixedAccumulator-=1/90;}}else fixedAccumulator=0;
@@ -225,11 +230,11 @@ function animate(ms,frame){
     if(pendingResult&&now>=pendingResult.at&&(!pendingResult.won||!view.cinematics.some(c=>c.kind==='death')))showResult();
     sound.update(!paused&&game.state==='playing',game.boss?.phase||0,game.player.charge,game.act);view.update(game,paused?0:dt,now);view.updateTether(motionCue,game.player,!!xrSession&&!paused&&game.state==='playing');
     if(now-messageUntil>0)message=null;
-    view.hudUpdate(game,!!xrSession,paused,message,settings,{rows:menu.rows(settings,game.state!=='playing',needsPlacement),selected:menu.selected});
+    view.hudUpdate(game,!!xrSession,paused,message,settings,{rows:menu.rows(settings,game.state!=='playing',needsPlacement),selected:menu.selected,deploying:deploymentPending,tracking:roomLock.requiresRecenter?'recenter':roomLock.lost?'lost':roomLock.mode});
     uiClock+=dt;if(uiClock>.1){updateDOM(now);uiClock=0;}
   }
   view.render(now,playing);
 }
 startLoop();
 // Development-only observability for isolated lifecycle verification.
-if(import.meta.env.DEV)window.__rift={game,view,sound,settings,menu,startDesktop,setPaused,returnHome,exitGame,readInput,motionPilot,get motionCue(){return motionCue;},get paused(){return paused;},get playing(){return playing;},get loopRunning(){return loopRunning;},get frameCount(){return frameCount;},get exiting(){return exiting;}};
+if(import.meta.env.DEV)window.__rift={game,view,sound,settings,menu,startDesktop,setPaused,returnHome,exitGame,readInput,motionPilot,roomLock,get deploymentPending(){return deploymentPending;},get motionCue(){return motionCue;},get paused(){return paused;},get playing(){return playing;},get loopRunning(){return loopRunning;},get frameCount(){return frameCount;},get exiting(){return exiting;}};

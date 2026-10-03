@@ -10,11 +10,11 @@ A passthrough mixed-reality side-scrolling shooter for Meta Quest 3, built with 
 2. Select **Enter mixed reality** and accept the immersive-session prompt. Both Touch controllers are required.
 3. Face the room area you want to use. The flight plane is placed in that direction, near eye height and above the floor.
 4. In the pause menu, move the left stick up/down to select a row and left/right to adjust it. Set arena width and plane distance (5–8 feet). **X** recenters the arena.
-5. Select **Deploy ship** and pull the right trigger to start. The arena stays fixed as you move your head.
+5. Look straight ahead where you want the arena, select **Deploy ship**, and pull the right trigger. Deployment centers the plane in your current facing direction, upright at eye height. The arena stays fixed as you move your head.
 
 The scene has no skybox, opaque background, or background art. The immersive AR session and zero-alpha WebGL clear leave the room visible. Combat simulation is strictly 2D; incoming enemies only become collidable after arriving on the plane. Explosions, debris, hulls, and machinery provide decorative depth. Amber rings mark exact enemy and boss collision boundaries.
 
-Room fit is manual: this version does not scan walls, request room meshes, or occlude objects behind furniture. Default width is 3.8 m with a 16:9 arena. The ship is approximately 8 cm long at default scale. Placement lasts for the current session. No APK installation is required.
+Room fit is manual: this version does not scan walls, request room meshes, or occlude objects behind furniture. Default width is 3.8 m with a 16:9 arena. The ship is approximately 8 cm long at default scale. Placement lasts for the current session. The game requests a native WebXR room anchor to preserve physical placement as tracking coordinates change. If anchors are unavailable, it compensates reference-space resets with a known transform; an unknown reset pauses play and asks for X to recenter. Lost anchor tracking pauses play and audio; recovery still requires Resume. Recenter replaces the anchor without restarting the level, and Exit deletes anchors including requests that finish late. No persistent room data is stored. No APK installation is required.
 
 ## Controls
 
@@ -33,7 +33,7 @@ Room fit is manual: this version does not scan walls, request room meshes, or oc
 | Restart | Right trigger after results | Restart / R |
 | Exit | Pause → Exit game → right trigger; system session exit also shuts down | Pause → Exit game |
 
-Focus reduces movement range and reveals the exact hitbox. Full charge takes 1.4 seconds; the lance works with every loadout. Bombs clear hostile bullets, cancel boss beams, briefly protect the ship, and damage enemies. Firing is deliberate. Tracking loss, missing controllers, or app visibility loss pauses play.
+Focus slows movement and reveals the exact hitbox. Full charge takes 1.4 seconds; the lance works with every loadout. Bombs clear hostile bullets, cancel boss beams, briefly protect the ship, and damage enemies. Firing is deliberate. Tracking loss, missing controllers, or app visibility loss pauses play.
 
 ## Motion controls
 
