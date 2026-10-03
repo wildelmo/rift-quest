@@ -20,12 +20,15 @@ hex-plated sentinel pushes out through the wall in front of you.
 
 | Input | Action |
 | --- | --- |
-| Grip (hold) | Hold the ship. Let go to pause; grab it again to resume. |
-| Point the ship | Auto-fire goes wherever the nose points (light aim assist). |
-| Trigger (hold → release) | Charge an R-Type style wave blast. It pierces everything. |
-| A / X, B / Y, or off-hand trigger | Singularity bomb: clears bullets and makes you briefly invulnerable. |
+| Grip (hold) | Hold the ship. It tracks your controller 1:1. Let go to pause. |
+| Trigger (hold) | Fire a continuous stream wherever the nose points (light aim assist). |
+| A / X | Singularity bomb: clears bullets and makes you briefly invulnerable. |
+| B / Y | Open the menu: Resume, Restart Stage, Sound, Exit Game. |
 | Thumbstick click (paused / menus) | Recentre the arena in front of you. |
-| B / Y (paused) | Toggle sound. |
+
+Menus are pointable: a laser comes out of each controller, and you pull the trigger on a button to
+choose it. **Exit Game** ends the mixed-reality session and stops all audio. Leaving through the
+Quest system menu or switching tabs also silences the game.
 
 Turn your off-hand wrist toward you to see a wrist display with your score, ships and bombs.
 
@@ -48,8 +51,9 @@ Turn your off-hand wrist toward you to see a wrist display with your score, ship
   - **Heart:** the shell opens a single aperture. You can only hit the core by flying into its
     gaze, inside the hollow cone of fire it pours out.
 
-Everything is procedural: models, particles, the synthwave soundtrack, and spatialised HRTF
-sound effects. There are no asset files.
+Everything is procedural: models, the panelled hull textures (albedo, normal, roughness and
+emissive maps generated on a canvas at startup), particles, the synthwave soundtrack, and
+spatialised HRTF sound effects. There are no asset files.
 
 ## Develop
 
@@ -91,12 +95,14 @@ src/
     stage.js         the four waves and the boss sequence
     boss.js          THE GYRE
     enemies.js       darts, blooms, lancers, carriers, the swarm, capsules
-    player.js        ship, shots, options, charge blast
+    player.js        ship, shots, options, engine trails
     bullets.js       enemy bullets, lasers, score stars
     patterns.js      pure bullet-pattern geometry (fans, cones, shells)
     room.js          arena placement, detected walls/tables, rifts, deck, dimmer
     screens.js       hex dot-matrix LED screens hung on your walls
     hud.js           in-headset UI
     models.js        procedural models
+    textures.js      procedural hull texture set + box-projected UVs
+    menu.js          pointable in-headset menu
     fx.js            particles and debris
 ```

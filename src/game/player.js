@@ -227,10 +227,34 @@ export class Ship {
     this.group.add(this.coreRing);
 
     // Shield bubble
-    this.shieldMesh = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.085, 1),
-      new THREE.MeshBasicMaterial({ color: 0x55ddff, wireframe: true, transparent: true, opacity: 0.5, toneMapped: false, depthWrite: false }),
-    );
+    this.shieldMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false,
+      uniforms: { uTime: { value: 0 }, uAlpha: { value: 1 } },
+      vertexShader: /* glsl */ `
+        varying vec3 vN; varying vec3 vV; varying vec3 vP;
+        void main() {
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vP = position;
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform float uTime; uniform float uAlpha;
+        varying vec3 vN; varying vec3 vV; varying vec3 vP;
+        void main() {
+          float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.5);
+          // hex-ish cell lines from a 3-axis triangle grid on the sphere
+          vec3 q = normalize(vP) * 9.0;
+          float g = min(min(abs(fract(q.x + q.y * 0.5) - 0.5), abs(fract(q.y - q.z * 0.5) - 0.5)), abs(fract(q.z + q.x * 0.5) - 0.5));
+          float cells = smoothstep(0.06, 0.0, g);
+          float sweep = 0.5 + 0.5 * sin(vP.y * 60.0 - uTime * 5.0);
+          float a = (fres * 0.85 + cells * (0.15 + 0.25 * sweep) * (0.3 + fres)) * uAlpha;
+          vec3 col = mix(vec3(0.2, 0.8, 1.0), vec3(0.9, 1.0, 1.0), fres);
+          gl_FragColor = vec4(col * a, a * 0.35);
+        }`,
+      blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+    });
+    this.shieldMesh = new THREE.Mesh(new THREE.SphereGeometry(0.075, 32, 20), this.shieldMat);
+    this.shieldMesh.renderOrder = 16;
     this.shieldMesh.visible = false;
     this.group.add(this.shieldMesh);
 
@@ -388,8 +412,9 @@ export class Ship {
     this.coreRing.scale.setScalar(pulse);
     this.shieldMesh.visible = this.shield;
     if (this.shield) {
-      this.shieldMesh.rotation.y += dt * 0.8;
-      this.shieldMesh.material.opacity = 0.32 + 0.12 * Math.sin(this.time * 6);
+      this.shieldMesh.rotation.y += dt * 0.6;
+      this.shieldMat.uniforms.uTime.value = this.time;
+      this.shieldMat.uniforms.uAlpha.value = 0.8 + 0.2 * Math.sin(this.time * 6);
     }
     this.aimMat.uniforms.uTime.value = this.time;
     this.aimMat.uniforms.uAlpha.value = this.held ? 0.75 : 0.0;

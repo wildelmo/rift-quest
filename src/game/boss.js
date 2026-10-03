@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clamp, easeInOutCubic, easeOutBack, inAperture, rand, segmentSphere, torusDistance, TAU } from '../engine/math.js';
-import { gyreCore, gyreEmitter, gyreFins, gyrePod, gyreRing, gyreShell, PALETTE, flareTexture } from './models.js';
+import { gyreCore, gyreEmitter, gyreFins, gyrePod, gyreRing, gyreShell, PALETTE, flareTexture, setFlash } from './models.js';
 import { cone, dirTo, fan, normalize, shell } from './patterns.js';
 import { COLORS } from './fx.js';
 
@@ -691,7 +691,7 @@ export class Gyre {
         p.flash -= dt;
         const on = p.flash > 0;
         const hull = p.model?.userData.hull;
-        if (hull) hull.material.emissive.setScalar(on ? 0.9 : 0);
+        if (hull) setFlash(hull.material, on ? 0.75 : 0);
         if (p.kind === 'core') this.core.scale.multiplyScalar(on ? 1.06 : 1);
       }
     }

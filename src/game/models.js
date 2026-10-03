@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { hullTextures, boxUVs } from './textures.js';
 
 // Procedural, low-poly but sculpted models. Every model merges its parts into two meshes:
 // a lit "hull" (flat-shaded metal with vertex colours) and an unlit "glow" layer. That keeps
@@ -28,19 +29,49 @@ export function setEnvironment(map) {
 }
 
 const hullMaterials = new Map();
+/**
+ * Textured hull material: vertex colours tint a shared procedural panel texture set
+ * (albedo detail, normal, roughness/metalness, small emissive lights). Supports a white
+ * hit-flash via setFlash().
+ */
 export function hullMaterial(opts = {}) {
   const key = JSON.stringify(opts);
   if (hullMaterials.has(key) && !opts.unique) return hullMaterials.get(key);
+  const tex = hullTextures();
   const m = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    flatShading: true,
     metalness: opts.metalness ?? 0.55,
     roughness: opts.roughness ?? 0.32,
     envMap,
     envMapIntensity: opts.envIntensity ?? 1.1,
   });
+  if (tex && opts.textured !== false) {
+    m.map = tex.map;
+    m.normalMap = tex.normalMap;
+    m.normalScale.set(0.9, 0.9);
+    m.roughnessMap = tex.roughnessMap;
+    m.metalnessMap = tex.roughnessMap;
+    m.emissiveMap = tex.emissiveMap;
+    m.emissive.set(0xffffff);
+    m.emissiveIntensity = 1.4;
+    m.roughness = 1; // the map supplies the actual values
+    m.metalness = 1;
+  }
+  m.userData.flash = { value: 0 };
+  m.onBeforeCompile = function (shader) {
+    shader.uniforms.uFlash = this.userData.flash;
+    shader.fragmentShader = 'uniform float uFlash;\n' + shader.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      '#include <dithering_fragment>\n  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0, 0.95, 0.9), uFlash);',
+    );
+  };
   if (!opts.unique) hullMaterials.set(key, m);
   return m;
+}
+
+/** White hit-flash amount (0..1) on a hull material. */
+export function setFlash(material, v) {
+  if (material && material.userData.flash) material.userData.flash.value = v;
 }
 
 const glowMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
@@ -64,6 +95,21 @@ function colorize(geo, color) {
   return g;
 }
 
+/** Swap the 2nd and 3rd vertex of every triangle (non-indexed geometry). */
+function flipWinding(g) {
+  for (const name of Object.keys(g.attributes)) {
+    const a = g.getAttribute(name);
+    const n = a.itemSize, arr = a.array;
+    for (let i = 0; i < a.count; i += 3) {
+      for (let k = 0; k < n; k++) {
+        const t = arr[(i + 1) * n + k];
+        arr[(i + 1) * n + k] = arr[(i + 2) * n + k];
+        arr[(i + 2) * n + k] = t;
+      }
+    }
+  }
+}
+
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -77,19 +123,29 @@ export class ModelBuilder {
     this.glow = [];
   }
 
-  add(geo, color, { pos = [0, 0, 0], rot = [0, 0, 0], scale = [1, 1, 1], glow = false, mirrorX = false } = {}) {
-    const place = (mx) => {
+  add(geo, color, { pos = [0, 0, 0], rot = [0, 0, 0], scale = [1, 1, 1], glow = false, mirrorX = false, smooth = false } = {}) {
+    const place = (mirror) => {
       const g = colorize(geo.clone(), color);
-      _p.set(pos[0] * mx, pos[1], pos[2]);
-      _e.set(rot[0], rot[1] * mx, rot[2] * mx);
+      if (!smooth) {
+        // faceted: recompute per-face normals so armour plates read as crisp facets
+        g.deleteAttribute('normal');
+        g.computeVertexNormals();
+      }
+      _p.set(pos[0], pos[1], pos[2]);
+      _e.set(rot[0], rot[1], rot[2]);
       _q.setFromEuler(_e);
       _s.set(scale[0], scale[1], scale[2]);
       _m.compose(_p, _q, _s);
       g.applyMatrix4(_m);
+      if (mirror) {
+        // true reflection across X (handles one-sided shapes like wings), then fix the winding
+        g.applyMatrix4(_m.makeScale(-1, 1, 1));
+        flipWinding(g);
+      }
       (glow ? this.glow : this.hull).push(g);
     };
-    place(1);
-    if (mirrorX) place(-1);
+    place(false);
+    if (mirrorX) place(true);
     return this;
   }
 
@@ -98,6 +154,7 @@ export class ModelBuilder {
     let hullMesh = null, glowMesh = null;
     if (this.hull.length) {
       const g = mergeGeometries(this.hull, false);
+      boxUVs(g, materialOpts.uvDensity ?? 9);
       g.computeBoundingSphere();
       hullMesh = new THREE.Mesh(g, hullMaterial(materialOpts));
       group.add(hullMesh);
@@ -113,9 +170,9 @@ export class ModelBuilder {
     return group;
   }
 
-  geometries() {
+  geometries(uvDensity = 9) {
     return {
-      hull: this.hull.length ? mergeGeometries(this.hull, false) : null,
+      hull: this.hull.length ? boxUVs(mergeGeometries(this.hull, false), uvDensity) : null,
       glow: this.glow.length ? mergeGeometries(this.glow, false) : null,
     };
   }
@@ -198,84 +255,161 @@ export function buildOption() {
 
 // ---------- enemies ----------
 
-/** Dart: fast scout. ~6cm. */
-export function buildDart() {
-  const b = new ModelBuilder();
-  const C = PALETTE;
-  b.add(taper(0.012, 0.0, 0.05, 3), C.enemyHull, { pos: [0, 0, -0.01], rot: [0, 0, Math.PI], scale: [1.2, 0.55, 1] });
-  b.add(wing([[0.006, 0.02], [0.034, 0.03], [0.03, 0.02], [0.006, -0.012]], 0.0018), C.enemyTrim, { mirrorX: true });
-  b.add(wing([[0.03, 0.03], [0.036, 0.034], [0.04, 0.012], [0.032, 0.018]], 0.0016), C.enemyDark, { mirrorX: true });
-  b.add(taper(0.006, 0.008, 0.012, 6), C.enemyDark, { pos: [0, 0, 0.018] });
-  b.add(new THREE.SphereGeometry(0.0052, 8, 6), C.enemyGlow, { pos: [0, 0.0035, -0.008], scale: [1, 0.6, 1.4], glow: true });
-  b.add(new THREE.CylinderGeometry(0.004, 0.004, 0.001, 8).rotateX(Math.PI / 2), C.enemyHot, { pos: [0, 0, 0.0245], glow: true });
-  return b.build({ metalness: 0.6, roughness: 0.35, unique: true });
+/** Smooth body of revolution along Z. profile: [[radius, z], ...] from nose (-Z) to tail (+Z). */
+function hullBody(profile, segments = 14) {
+  const pts = profile.map(([r, z]) => new THREE.Vector2(Math.max(r, 0.00001), -z));
+  const g = new THREE.LatheGeometry(pts, segments);
+  g.rotateX(-Math.PI / 2);
+  return g;
 }
 
-/** Bloom: spiral turret mine. Core + six petals (petals are a separate child to animate). */
+/** Upper shell cap (a slice of a sphere), for carapace armour. */
+function carapace(radius, arc = 0.45, segs = 16) {
+  return new THREE.SphereGeometry(radius, segs, 8, 0, Math.PI * 2, 0, Math.PI * arc);
+}
+
+const ALIEN = {
+  hull: 0x3a3e48, shell: 0x6e1d2b, shell2: 0x4a1520, bone: 0xc8bfa8, dark: 0x22242c, metal: 0x7d828e, wing: 0x565b68,
+  eye: 0xff2238, vein: 0xff3a52, engine: 0xff8a2a,
+};
+
+/** Wasp interceptor: insect-like alien fighter with carapace armour, mandibles and blade wings. ~8 cm. */
+export function buildDart() {
+  const b = new ModelBuilder();
+  const C = ALIEN;
+  // thorax + abdomen body with a pinched waist
+  b.add(hullBody([[0, -0.044], [0.004, -0.039], [0.0085, -0.03], [0.011, -0.016], [0.0115, -0.002], [0.0098, 0.009], [0.0055, 0.015], [0.0085, 0.021], [0.0095, 0.03], [0.006, 0.039], [0, 0.043]]), C.hull, { scale: [1.25, 0.8, 1], smooth: true });
+  // carapace plates
+  b.add(carapace(0.0145, 0.42), C.shell, { pos: [0, 0.0035, -0.012], scale: [1.05, 0.62, 2.0], smooth: true });
+  b.add(carapace(0.011, 0.45), C.shell2, { pos: [0, 0.0035, 0.028], scale: [1.05, 0.7, 1.35], smooth: true });
+  for (let i = 0; i < 4; i++) b.add(new THREE.BoxGeometry(0.0022, 0.0028, 0.006), C.metal, { pos: [0, 0.0115 - Math.abs(i - 1.5) * 0.0012, -0.026 + i * 0.008] });
+  // mandibles curving in at the nose
+  b.add(taper(0.0022, 0.0003, 0.024, 5), C.bone, { pos: [0.0075, -0.0025, -0.05], rot: [0.08, -0.32, 0], mirrorX: true });
+  b.add(taper(0.0015, 0.0002, 0.014, 5), C.bone, { pos: [0.011, -0.004, -0.04], rot: [0.1, -0.7, 0], mirrorX: true });
+  // eye clusters
+  for (const [x, y, z, r] of [[0.0062, 0.0032, -0.031, 0.0021], [0.0078, 0.0008, -0.027, 0.0017], [0.0052, 0.0052, -0.025, 0.0015]]) {
+    b.add(new THREE.SphereGeometry(r, 8, 6), C.eye, { pos: [x, y, z], glow: true, mirrorX: true });
+  }
+  // blade wings with glowing veins
+  b.add(wing([[0.008, -0.012], [0.042, 0.004], [0.049, 0.018], [0.038, 0.015], [0.01, 0.006]], 0.0012), C.wing, { pos: [0, 0.001, 0], mirrorX: true });
+  b.add(new THREE.BoxGeometry(0.036, 0.0008, 0.0011), C.vein, { pos: [0.026, 0.0018, -0.0035], rot: [0, -0.45, 0], glow: true, mirrorX: true });
+  b.add(wing([[0.006, 0.012], [0.032, 0.026], [0.035, 0.035], [0.008, 0.022]], 0.001), C.shell2, { pos: [0, -0.001, 0], mirrorX: true });
+  b.add(new THREE.BoxGeometry(0.026, 0.0007, 0.001), C.vein, { pos: [0.02, -0.0002, 0.019], rot: [0, -0.5, 0], glow: true, mirrorX: true });
+  // dorsal fin + tail stinger engine
+  b.add(wing([[0, 0.018], [0.012, 0.03], [0.012, 0.036], [0, 0.032]], 0.0012), C.shell, { pos: [0, 0.006, 0], rot: [0, 0, Math.PI / 2] });
+  b.add(new THREE.TorusGeometry(0.0055, 0.0014, 6, 14), C.metal, { pos: [0, 0, 0.041], smooth: true });
+  b.add(new THREE.SphereGeometry(0.0045, 10, 8), C.engine, { pos: [0, 0, 0.042], glow: true });
+  return b.build({ metalness: 0.6, roughness: 0.35, unique: true, uvDensity: 11 });
+}
+
+/** Spore mine: armoured core whose shell petals open to fire spirals. */
 export function buildBloom() {
-  const C = PALETTE;
+  const C = ALIEN;
   const core = new ModelBuilder();
-  core.add(new THREE.IcosahedronGeometry(0.03, 1), C.enemyDark, {});
-  core.add(new THREE.SphereGeometry(0.018, 12, 8), C.enemyGlow, { pos: [0, 0, 0.018], glow: true, scale: [1, 1, 0.6] });
-  core.add(new THREE.TorusGeometry(0.034, 0.0045, 6, 18), C.bossGold, {});
-  const group = core.build({ metalness: 0.7, roughness: 0.3, unique: true });
+  core.add(new THREE.SphereGeometry(0.028, 18, 14), C.hull, { smooth: true });
+  core.add(new THREE.SphereGeometry(0.016, 14, 10), C.eye, { pos: [0, 0, 0.02], glow: true, scale: [1, 1, 0.55] });
+  core.add(new THREE.TorusGeometry(0.019, 0.0028, 8, 24), C.bone, { pos: [0, 0, 0.022], smooth: true });
+  core.add(new THREE.TorusGeometry(0.033, 0.004, 8, 28), C.metal, { smooth: true });
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    core.add(new THREE.BoxGeometry(0.006, 0.006, 0.01), C.dark, { pos: [Math.cos(a) * 0.033, Math.sin(a) * 0.033, -0.004], rot: [0, 0, a] });
+  }
+  const group = core.build({ metalness: 0.7, roughness: 0.3, unique: true, uvDensity: 11 });
   const petals = new ModelBuilder();
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
-    const petal = taper(0.011, 0.0, 0.05, 4);
-    petal.rotateX(Math.PI / 2);
-    petal.translate(0, 0.056, 0);
+    // a curved armour petal: a slice of a sphere shell, pointing outward like a flower
+    const petal = new THREE.SphereGeometry(0.05, 10, 8, -0.38, 0.76, Math.PI * 0.12, Math.PI * 0.36);
+    petal.rotateZ(-Math.PI / 2);
+    petal.rotateY(-Math.PI / 2); // sphere slice now bulges toward +Z, spreading along +Y
+    petal.translate(0, 0.012, -0.03);
     petal.rotateZ(a);
-    petals.add(petal, i % 2 ? C.enemyTrim : C.enemyHull, { scale: [1, 1, 0.5] });
-    const tip = new THREE.SphereGeometry(0.0042, 6, 4);
-    tip.translate(0, 0.083, 0);
+    petals.add(petal, i % 2 ? C.shell : C.shell2, { smooth: true });
+    const spike = taper(0.0045, 0.0, 0.03, 5);
+    spike.rotateX(Math.PI / 2);
+    spike.translate(0, 0.068, -0.004);
+    spike.rotateZ(a);
+    petals.add(spike, C.bone);
+    const tip = new THREE.SphereGeometry(0.004, 8, 6);
+    tip.translate(0, 0.084, -0.004);
     tip.rotateZ(a);
-    petals.add(tip, C.enemyHot, { glow: true });
+    petals.add(tip, C.engine, { glow: true });
+    const vein = new THREE.BoxGeometry(0.0016, 0.03, 0.0012);
+    vein.translate(0, 0.045, 0.009);
+    vein.rotateZ(a);
+    petals.add(vein, C.vein, { glow: true });
   }
-  const petalGroup = petals.build({ metalness: 0.5, roughness: 0.35 });
+  const petalGroup = petals.build({ metalness: 0.5, roughness: 0.35, uvDensity: 11 });
   group.add(petalGroup);
   group.userData.petals = petalGroup;
   return group;
 }
 
-/** Mite: tiny swarm drone, geometry only (rendered instanced). */
+/** Swarm mite: a tiny wasp drone, geometry only (rendered instanced). ~3.5 cm. */
 export function miteGeometries() {
   const b = new ModelBuilder();
-  b.add(new THREE.TetrahedronGeometry(0.012, 0), PALETTE.enemyHull, { scale: [1, 0.6, 1.6] });
-  b.add(wing([[0.003, 0.004], [0.02, 0.012], [0.004, -0.008]], 0.001), PALETTE.enemyTrim, { mirrorX: true });
-  b.add(new THREE.OctahedronGeometry(0.0045, 0), PALETTE.enemyGlow, { pos: [0, 0.003, -0.006], glow: true });
-  return b.geometries();
+  const C = ALIEN;
+  b.add(hullBody([[0, -0.018], [0.004, -0.012], [0.0055, -0.004], [0.003, 0.004], [0.0045, 0.01], [0, 0.017]], 10), C.hull, { scale: [1.2, 0.8, 1], smooth: true });
+  b.add(carapace(0.006, 0.45, 10), C.shell, { pos: [0, 0.0015, -0.006], scale: [1, 0.6, 1.8], smooth: true });
+  b.add(wing([[0.003, -0.004], [0.02, 0.004], [0.022, 0.01], [0.004, 0.004]], 0.0008), C.wing, { mirrorX: true });
+  b.add(new THREE.BoxGeometry(0.016, 0.0006, 0.0008), C.vein, { pos: [0.012, 0.0006, 0.0], rot: [0, -0.4, 0], glow: true, mirrorX: true });
+  b.add(new THREE.SphereGeometry(0.0022, 8, 6), C.eye, { pos: [0.0028, 0.0018, -0.013], glow: true, mirrorX: true });
+  b.add(new THREE.SphereGeometry(0.0022, 8, 6), C.engine, { pos: [0, 0, 0.017], glow: true });
+  return b.geometries(13);
 }
 
-/** Lancer: laser frigate. ~16cm long, emitter at the nose. */
+/** Lancer: long laser frigate with a forked prow cradling the emitter crystal. ~19 cm. */
 export function buildLancer() {
   const b = new ModelBuilder();
-  const C = PALETTE;
-  b.add(taper(0.018, 0.008, 0.11, 6), C.enemyHull, { pos: [0, 0, 0.0], scale: [1, 0.7, 1] });
-  b.add(taper(0.02, 0.018, 0.03, 6), C.enemyDark, { pos: [0, 0, 0.07], scale: [1, 0.7, 1] });
-  b.add(wing([[0.012, 0.05], [0.07, 0.085], [0.075, 0.07], [0.018, -0.02]], 0.003), C.enemyTrim, { mirrorX: true });
-  b.add(wing([[0.06, 0.06], [0.075, 0.07], [0.08, 0.0], [0.07, 0.01]], 0.0025), C.enemyDark, { mirrorX: true });
-  b.add(new THREE.OctahedronGeometry(0.014, 0), 0xff4060, { pos: [0, 0, -0.065], glow: true, scale: [1, 1, 1.6] });
-  b.add(new THREE.TorusGeometry(0.016, 0.0028, 4, 12), C.bossGold, { pos: [0, 0, -0.052] });
-  for (const x of [-1, 1]) b.add(new THREE.CylinderGeometry(0.006, 0.006, 0.002, 8).rotateX(Math.PI / 2), C.enemyHot, { pos: [0.012 * x, 0, 0.086], glow: true });
-  return b.build({ metalness: 0.6, roughness: 0.35, unique: true });
+  const C = ALIEN;
+  b.add(hullBody([[0, -0.07], [0.006, -0.064], [0.011, -0.048], [0.015, -0.02], [0.017, 0.02], [0.015, 0.048], [0.019, 0.058], [0.017, 0.074], [0.008, 0.082], [0, 0.084]], 16), C.hull, { scale: [1.2, 0.78, 1], smooth: true });
+  b.add(carapace(0.02, 0.4), C.shell, { pos: [0, 0.006, -0.01], scale: [0.95, 0.55, 2.6], smooth: true });
+  for (const z of [-0.035, -0.005, 0.025, 0.05]) b.add(new THREE.TorusGeometry(0.0168, 0.0022, 6, 20), C.metal, { pos: [0, 0, z], scale: [1.2, 0.78, 1], smooth: true });
+  // forked prow
+  for (const sx of [-1, 1]) {
+    b.add(taper(0.005, 0.0015, 0.05, 6), C.bone, { pos: [0.011 * sx, 0, -0.085], rot: [0, 0.12 * sx, 0] });
+    b.add(new THREE.SphereGeometry(0.0022, 8, 6), C.vein, { pos: [0.014 * sx, 0, -0.108], glow: true });
+  }
+  b.add(new THREE.OctahedronGeometry(0.012, 0), 0xff3355, { pos: [0, 0, -0.088], glow: true, scale: [0.8, 0.8, 1.7] });
+  b.add(new THREE.TorusGeometry(0.014, 0.0025, 6, 18), C.metal, { pos: [0, 0, -0.072], smooth: true });
+  // swept fins with veins
+  b.add(wing([[0.014, 0.03], [0.07, 0.07], [0.076, 0.084], [0.06, 0.082], [0.016, 0.06]], 0.0025), C.shell2, { mirrorX: true });
+  b.add(wing([[0.012, -0.03], [0.045, -0.005], [0.048, 0.004], [0.014, -0.01]], 0.002), C.wing, { mirrorX: true });
+  b.add(new THREE.BoxGeometry(0.056, 0.0012, 0.0014), C.vein, { pos: [0.044, 0.0015, 0.055], rot: [0, -0.62, 0], glow: true, mirrorX: true });
+  // engines
+  for (const sx of [-1, 1]) {
+    b.add(new THREE.CylinderGeometry(0.0065, 0.0075, 0.016, 12).rotateX(Math.PI / 2), C.dark, { pos: [0.012 * sx, 0, 0.078], smooth: true });
+    b.add(new THREE.CylinderGeometry(0.005, 0.005, 0.002, 12).rotateX(Math.PI / 2), C.engine, { pos: [0.012 * sx, 0, 0.087], glow: true });
+  }
+  return b.build({ metalness: 0.6, roughness: 0.35, unique: true, uvDensity: 10 });
 }
 
-/** Carrier: armoured hexagonal hull with bay doors. ~24cm. */
+/** Carrier: heavy armoured mothership with launch bays, a bridge tower and an engine cluster. ~30 cm. */
 export function buildCarrier() {
   const b = new ModelBuilder();
-  const C = PALETTE;
-  b.add(taper(0.07, 0.05, 0.16, 6), C.enemyHull, { scale: [1, 0.55, 1] });
-  b.add(taper(0.05, 0.02, 0.06, 6), C.enemyDark, { pos: [0, 0, -0.11], scale: [1, 0.55, 1] });
-  b.add(new THREE.BoxGeometry(0.16, 0.012, 0.12), C.enemyTrim, { pos: [0, 0, 0.01] });
-  for (const x of [-1, 1]) {
-    b.add(new THREE.BoxGeometry(0.03, 0.045, 0.14), C.enemyDark, { pos: [0.085 * x, 0, 0.01] });
-    b.add(new THREE.BoxGeometry(0.004, 0.03, 0.1), C.enemyHot, { pos: [0.1 * x, 0, 0.01], glow: true });
-    b.add(new THREE.CylinderGeometry(0.014, 0.014, 0.003, 10).rotateX(Math.PI / 2), C.enemyHot, { pos: [0.085 * x, 0, 0.082], glow: true });
+  const C = ALIEN;
+  b.add(hullBody([[0, -0.15], [0.016, -0.14], [0.034, -0.11], [0.05, -0.06], [0.058, 0.0], [0.058, 0.06], [0.05, 0.11], [0.042, 0.13], [0, 0.135]], 18), C.hull, { scale: [1.45, 0.62, 1], smooth: true });
+  b.add(carapace(0.06, 0.38, 20), C.shell, { pos: [0, 0.01, -0.02], scale: [1.25, 0.5, 2.0], smooth: true });
+  // armour belt and side launch bays
+  for (const sx of [-1, 1]) {
+    b.add(new THREE.BoxGeometry(0.03, 0.04, 0.17), C.metal, { pos: [0.083 * sx, -0.004, 0.0] });
+    b.add(new THREE.BoxGeometry(0.004, 0.022, 0.12), C.engine, { pos: [0.099 * sx, -0.004, 0.0], glow: true });
+    for (let i = 0; i < 5; i++) b.add(new THREE.BoxGeometry(0.034, 0.006, 0.02), C.dark, { pos: [0.083 * sx, 0.019, -0.065 + i * 0.033] });
   }
-  b.add(new THREE.SphereGeometry(0.022, 12, 8), C.enemyGlow, { pos: [0, 0.03, -0.03], scale: [1, 0.5, 1.3], glow: true });
-  b.add(new THREE.BoxGeometry(0.05, 0.02, 0.05), C.bossGold, { pos: [0, -0.04, 0.02] });
-  return b.build({ metalness: 0.65, roughness: 0.3, unique: true });
+  // bridge tower
+  b.add(new THREE.BoxGeometry(0.03, 0.03, 0.04), C.metal, { pos: [0, 0.045, 0.045] });
+  b.add(taper(0.016, 0.01, 0.03, 6), C.dark, { pos: [0, 0.064, 0.045], rot: [Math.PI / 2, 0, 0] });
+  b.add(new THREE.BoxGeometry(0.026, 0.004, 0.003), 0x55e6ff, { pos: [0, 0.052, 0.025], glow: true });
+  for (const sx of [-1, 1]) b.add(new THREE.CylinderGeometry(0.0012, 0.0012, 0.05, 5), C.metal, { pos: [0.01 * sx, 0.085, 0.055] });
+  // ram prong + sensor eye
+  b.add(taper(0.012, 0.002, 0.06, 6), C.bone, { pos: [0, -0.01, -0.17] });
+  b.add(new THREE.SphereGeometry(0.014, 14, 10), C.eye, { pos: [0, 0.006, -0.125], glow: true, scale: [1.3, 0.6, 1] });
+  // engine cluster
+  for (const [x, y] of [[-0.03, 0], [0.03, 0], [0, 0.018], [0, -0.016]]) {
+    b.add(new THREE.CylinderGeometry(0.011, 0.013, 0.022, 14).rotateX(Math.PI / 2), C.dark, { pos: [x, y, 0.135], smooth: true });
+    b.add(new THREE.CylinderGeometry(0.009, 0.009, 0.002, 14).rotateX(Math.PI / 2), C.engine, { pos: [x, y, 0.147], glow: true });
+  }
+  return b.build({ metalness: 0.65, roughness: 0.3, unique: true, uvDensity: 7 });
 }
 
 /** Power capsule (Gradius style): a glowing gem in a cage. */

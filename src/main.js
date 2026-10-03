@@ -5,6 +5,7 @@ import { Room, buildFakeRoom } from './game/room.js';
 import { Game } from './game/game.js';
 import { XRInput, DesktopInput, BotInput } from './input/input.js';
 import { seedRandom } from './engine/math.js';
+import * as models from './game/models.js';
 import './style.css';
 
 const params = new URLSearchParams(location.search);
@@ -328,7 +329,7 @@ function renderFrame() {
 
 // expose for automated tests and debugging
 window.__rift = {
-  game, room, renderer, scene, options, startDesktop,
+  game, room, renderer, scene, camera, options, startDesktop, models, THREE,
   // screen-space pixel position of a menu item, for automated UI tests
   menuItemScreen(i) {
     const p = game.menu.itemWorldPos(i).project(camera);

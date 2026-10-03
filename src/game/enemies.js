@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { catmullRom, clamp, rand, segmentSphere, TAU, easeInOutCubic } from '../engine/math.js';
-import { buildDart, buildBloom, buildLancer, buildCarrier, buildCapsule, miteGeometries, hullMaterial, getGlowMaterial, PALETTE } from './models.js';
+import { buildDart, buildBloom, buildLancer, buildCarrier, buildCapsule, miteGeometries, hullMaterial, getGlowMaterial, PALETTE, setFlash } from './models.js';
 import { cone, dirTo, fan, normalize, shell } from './patterns.js';
 import { COLORS } from './fx.js';
 import { makeCanvas, drawText } from '../engine/text.js';
@@ -99,7 +99,7 @@ export class Enemy {
     }
     if (this.flash > 0) {
       this.flash -= dt;
-      if (this.hull) this.hull.material.emissive.setScalar(this.flash > 0 ? 0.9 : 0);
+      if (this.hull) setFlash(this.hull.material, this.flash > 0 ? 0.85 : 0);
     }
     this.tick && this.tick(dt);
     if (this.t > 60) this.remove(); // safety net
@@ -147,7 +147,6 @@ export class Enemy {
 
 export function spawnDart(game, points, duration, opts = {}) {
   const e = new Enemy(game, buildDart(), { hp: opts.hp ?? 2.5, radius: 0.032, score: 100, kind: 'dart' });
-  e.model.scale.setScalar(1.3);
   catmullRom(points, 0, e.pos);
   e.followPath(points, duration, { done: () => e.remove() });
   if (opts.shots) {
@@ -300,7 +299,7 @@ export function spawnLancer(game, from, station, opts = {}) {
 // ------------------------------------------------------------------ carrier (armoured mothership)
 
 export function spawnCarrier(game, from, station, opts = {}) {
-  const e = new Enemy(game, buildCarrier(), { hp: opts.hp ?? 110, radius: 0.085, score: 4000, kind: 'carrier', explodeScale: 3.5 });
+  const e = new Enemy(game, buildCarrier(), { hp: opts.hp ?? 110, radius: 0.11, score: 4000, kind: 'carrier', explodeScale: 3.5 });
   e.model.rotation.y = Math.PI; // nose toward the player while it faces the ship
   e.pos.copy(from);
   e.faceVel = false;
