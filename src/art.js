@@ -19,6 +19,23 @@ export class Art {
     gradient.addColorStop(0,'rgba(255,255,255,1)');gradient.addColorStop(.12,'rgba(255,255,255,.8)');gradient.addColorStop(.32,'rgba(255,255,255,.22)');gradient.addColorStop(1,'rgba(255,255,255,0)');c.fillStyle=gradient;c.fillRect(0,0,128,128);
     this.glowTexture=new THREE.CanvasTexture(canvas);
   }
+  contour(group) {
+    // Two cached inverted hulls per body, never a screen-sized backplate or bloom pass.
+    const geos=[];group.updateMatrixWorld(true);const inverse=group.matrixWorld.clone().invert();
+    group.traverse(m=>{if(!m.isMesh||m.material.transparent||m.material.isMeshBasicMaterial)return;
+      const geometry=m.geometry.clone().applyMatrix4(inverse.clone().multiply(m.matrixWorld));
+      const plain=geometry.index?geometry.toNonIndexed():geometry;if(plain!==geometry)geometry.dispose();
+      for(const name of Object.keys(plain.attributes))if(!['position','normal','uv'].includes(name))plain.deleteAttribute(name);geos.push(plain);
+    });
+    if(!geos.length)return;const geometry=mergeGeometries(geos);for(const g of geos)g.dispose();
+    for(const [width,color] of [[.022,0x111827],[.010,0xe8eadb]]){
+      const key='contour-'+color;let material=this.materials.get(key);
+      if(!material){material=new THREE.MeshBasicMaterial({color,side:THREE.BackSide,toneMapped:false});
+        material.onBeforeCompile=shader=>{shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','vec3 transformed = position + normalize(normal) * '+width.toFixed(3)+';');};
+        material.customProgramCacheKey=()=>key;this.materials.set(key,material);}
+      const hull=new THREE.Mesh(geometry,material);hull.name='contrast-contour';group.add(hull);
+    }
+  }
   mat(color,glow=false,glass=false) {
     const key=`${color}/${glow}/${glass}`;
     if(!this.materials.has(key))this.materials.set(key,glow?new THREE.MeshBasicMaterial({color,toneMapped:false}):new THREE.MeshPhysicalMaterial({color,metalness:glass?.65:.72,roughness:glass?.12:.32,roughnessMap:glass?null:this.surface,bumpMap:glass?null:this.surface,bumpScale:.008,clearcoat:1,clearcoatRoughness:.18}));

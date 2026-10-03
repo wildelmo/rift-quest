@@ -40,3 +40,7 @@ The reviewer inspected actual scene captures and sequential frames from the fina
 ## Subsequent pause and shutdown update
 
 The 9.0 assessment above applies to the preceding art/combat revision; it is not a new grade for this menu update. Added saved volume/music/difficulty controls, an in-headset controller menu, and complete audio/rendering cleanup on Exit or system XR end. Arcade retains the reviewed balance. All 24 simulation/menu checks, isolated browser lifecycle checks, and desktop render checks pass. Simulated XR transport verifies controller/session code paths; on-headset menu readability, native tab-closing behavior, and sustained performance remain unverified.
+
+## Subsequent passthrough visibility update
+
+Added opaque shaded projectile bodies, graphite edges, warm/mint cores, dual hull contours, a persistent player beacon, and solid beam/warning borders. Decorative sparks no longer overdraw critical projectile marks. No simulation rules, room backdrop, or background processing were added. All 24 simulation/menu checks and browser render/lifecycle checks pass. The new contrast suite checks four room-color fixtures, minimum width at maximum distance, oblique views, shader compilation, and a visible hostile core through 182 burst particles. The staged busy scene had 92 hostile shots and 212 draw calls; a separate desktop render probe had 280 calls and 323,174 triangles. These are scene samples, not measured Quest frame rates. This pass has no new independent numerical grade; real Quest visibility and performance remain unverified.

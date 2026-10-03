@@ -42,7 +42,7 @@ export class Art extends BaseArt {
       const engine=this.part(g,this.cylinder,0xdbfbff,[-.64,side*.21,-.03],[.018,.23,.018],[0,0,Math.PI/2],true);engine.name=`engine${side}`;
     }
     this.part(h,this.box,C.gold,[-.25,0,.106],[.026,.055,.01]);
-    this.merge(h);this.models.set('sculpt-ship',g);return g.clone(true);
+    this.merge(h);this.contour(h);this.models.set('sculpt-ship',g);return g.clone(true);
   }
   enemy(type,r){
     const key=`sculpt-${type}/${r}`;if(this.models.has(key))return this.models.get(key).clone(true);
@@ -62,7 +62,7 @@ export class Art extends BaseArt {
       this.shell(h,[[-.5,.002,.002],[-.21,.115,.09],[.08,.15,.12],[.26,.07,.09],[.34,.002,.002]],palette[type]);
       for(const side of [-1,1]){this.shell(h,[[-.18,.002,.002],[-.06,.045,.035],[.12,.06,.025],[.32,.002,.002]],type==='dart'?C.copper:C.steel,[.09,side*(type==='dart'?.19:.22),-.02],[1,1,1],[0,0,side*.55]);this.tube(h,[[-.30,side*.06,.085],[-.06,side*.10,.115],[.14,side*.07,.10]],.009,type==='dart'?C.hot:0xffb65a,true);}
     }
-    this.ring(h,.09,.02,C.ink,.15);this.ring(h,.075,.008,type==='weaver'?0xdb75da:C.hot,.17,true);this.merge(h);
+    this.ring(h,.09,.02,C.ink,.15);this.ring(h,.075,.008,type==='weaver'?0xdb75da:C.hot,.17,true);this.merge(h);this.contour(h);
     const core=this.part(g,this.sphere,C.hot,[-.045,0,.175],[.055,.055,.025],[0,0,0],true);core.name='core';
     const glow=this.glow(type==='weaver'?0xc55ad6:C.hot,.3);glow.position.set(-.045,0,.18);g.add(glow);
     const jet=this.glow(C.hot);jet.name='jet';jet.position.set(.5,0,-.03);jet.scale.set(.45,.12,1);g.add(jet);

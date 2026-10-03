@@ -54,6 +54,16 @@ The **Cathedral** arrives after 180 seconds of level progression. Its phases cha
 
 Five power-ups: **Spread**, **Lance**, **Echo**, **Shield**, and **Bomb**. Duplicate weapons upgrade to level 3. Spread gains damage, cadence, and a seven-shot formation. Lance gains damage and parallel rails. Echo adds a second firing drone; shields absorb damage and repair one hull point. Nearby pickups magnetize. Grazing builds a visible temporary score multiplier; damage resets it. The browser stores the best score and flight settings locally.
 
+## Visibility in bright rooms
+
+Passthrough visibility is the default visual treatment. Projectiles have an opaque graphite keyline, a shaded saturated body, and a small warm or mint core. Warm coral/amber/magenta marks hostile fire; cool cyan/teal/violet marks player fire. Orb, petal, and needle proportions also distinguish patterns. Glow supports these solid marks instead of carrying their visibility. All core/body/keyline centers remain on the collision plane, including under oblique head views.
+
+Small ships have cached dark and light hull contours. The player ship stays visible throughout damage protection, with a steady outlined center beacon; a slow amber pulse indicates protection. Precision focus still displays the actual hitbox. Sparks have small dark edges and beams/warnings have solid contrast borders. Projectile marks draw after decorative transparency so explosion glow cannot erase them. Collision sizes and difficulty rules are unchanged.
+
+No room-sized dark panel, skybox, room texture, passthrough sampling, or full-screen effect is introduced. Two extra instanced batches handle projectile cores and spark outlines; two cached contour meshes are added per small hull. Physical Quest performance remains to be measured.
+
+The QA-only tests/contrast-check.cjs composites the actual transparent renderer against pale, warm, dark, and busy patterned fixtures. It checks opaque colored bodies/keylines, shader compilation, a narrow arena at 8 feet, oblique views, and a threat core inside a dense burst. These are desktop visual checks, not a substitute for real headset lighting/readability validation. Design references: [Meta color guidance](https://developers.meta.com/vr/design/styles_color/) and [mixed reality considerations](https://developers.meta.com/vr/design/mr-design-guideline/).
+
 ## Art, motion, and sound
 
 Compound hulls, glass, ceramic armor, graphite machinery, copper surfaces, manufactured roughness maps, articulated fins, engines, and deep mechanical piping establish distinct silhouettes. Shared merged geometry and instanced bullets/particles control draw cost. Electric ribbon beams, muzzle flashes, trails, soft shockwaves, and flying metal fragments provide spectacle without a background image or processing the room.
