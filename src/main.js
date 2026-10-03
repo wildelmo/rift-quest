@@ -12,7 +12,7 @@ const game = new Game(), sound = new Sound(), menu = new PauseMenu();
 let view;
 try { view = new View($('viewport')); }
 catch (error) { $('xr-status').textContent = `3D graphics could not start: ${error.message}. Enable hardware acceleration and reload.`; $('enter-xr').disabled = true; $('practice').disabled = true; throw error; }
-const roomLock=new RoomLock(view.root,{onLost:()=>setPaused(true),onChange:()=>{motionPilot.reset();motionCue=null;lastPose=null;}});
+const roomLock=new RoomLock(view.root,{onLost:()=>setPaused(true),onChange:()=>{motionPilot.reset();motionCue=null;lastPose=null;if(roomLock.requiresRecenter)needsPlacement=true;}});
 let storedSettings;
 try { storedSettings = JSON.parse(localStorage.getItem('rift-settings')); } catch {}
 const settings = normalizeSettings(storedSettings);
@@ -69,7 +69,7 @@ function resumeGame() {
 function restartGame() {
   if (exiting) return;
   if (!xrSession) { startDesktop(); return; }
-  resetGame(); resumeGame();
+  resetGame();deploymentPending=true;needsPlacement=true;setPaused(true);
 }
 function returnHome() {
   if (exiting) return;
@@ -142,7 +142,7 @@ $('enter-xr').addEventListener('click', async () => {
   let session;
   try {
     // Never replace the user's real room with an opaque VR backdrop.
-    session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'],optionalFeatures:['anchors'] });
+    session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'] });
     if (exiting) { await session.end(); return; }
     xrSession = session;
     session.addEventListener('end', () => { if (xrSession === session && !exiting) exitGame({ sessionEnded: true }); });
@@ -222,7 +222,7 @@ function animate(ms,frame){
   if(exiting||!loopRunning)return;frameCount++;
   const now=ms/1000,dt=Math.min(.05,lastTime?now-lastTime:0);lastTime=now;
   if(playing){
-    if(xrSession&&frame){const space=view.renderer.xr.getReferenceSpace(),pose=frame.getViewerPose(space);if(pose&&!pose.emulatedPosition){lastPose=pose;if(needsPlacement&&placeRoom(pose))needsPlacement=false;roomLock.update(frame,space);}else{lastPose=null;if(!paused)setPaused(true);}}
+    if(xrSession&&frame){const space=view.renderer.xr.getReferenceSpace();roomLock.connect(space);const pose=frame.getViewerPose(space);if(pose&&!pose.emulatedPosition){lastPose=pose;if(needsPlacement&&placeRoom(pose))needsPlacement=false;roomLock.update(frame,space);}else{lastPose=null;if(!paused)setPaused(true);}}
     const input=readInput(dt,now,frame);
     if(exiting)return;
     if(!paused&&game.state==='playing'){fixedAccumulator+=dt;while(fixedAccumulator>=1/90){game.update(1/90,input);fixedAccumulator-=1/90;}}else fixedAccumulator=0;
