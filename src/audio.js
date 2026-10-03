@@ -71,6 +71,8 @@ export class Sound {
     else if(e.type==='shoot'&&t-this.lastShot>.06){this.lastShot=t;this.sample(e.weapon==='LANCE'?'lance':e.weapon==='SPREAD'?'spread':'pulse',e.weapon==='LANCE'?.25:.19,pan,1+((e.level||1)-1)*.06);}
     if(e.type==='impact'&&t-this.lastImpact>.07){this.lastImpact=t;this.sample('impact',e.boss?.13:.18,pan,1+Math.random()*.15);}
     if(e.type==='enemyFire'&&t-this.lastEnemy>.22){this.lastEnemy=t;this.tone(e.heavy?85:260,.14,'sawtooth',.075,e.heavy?48:90,pan,1400);this.noise(.07,.055,1100,pan,'bandpass');}
+    if(e.type==='armorHit'&&t-(this.lastArmor||0)>.09){this.lastArmor=t;this.noise(.045,.04,5500,pan,'highpass');this.tone(1800,.055,'triangle',.045,700,pan,4500);}
+    if(e.type==='coreOpen'){this.noise(.55,.14,1200,pan,'bandpass');for(let i=0;i<3;i++)this.tone(330*Math.pow(1.5,i),.3,'triangle',.12,490,pan,3000,i*.11);}
     if(e.type==='partBreak'){this.sample('explosion',.32,pan,1.25);this.noise(.28,.15,2900,pan,'bandpass');this.tone(190,.28,'triangle',.12,45,pan,1600);}
     if(e.type==='kill'){this.sample(e.boss?'collapse':'explosion',e.boss?.8:.37,pan,.92+Math.random()*.16);if(e.boss)this.duckUntil=t+2;}
     if(e.type==='pickup'){for(let i=0;i<4;i++)this.tone([523,659,784,1047][i],.28,'sine',.14,[523,659,784,1047][i],0,4000,i*.06);}

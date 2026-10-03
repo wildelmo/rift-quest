@@ -11,4 +11,6 @@ export const BOSS_PART_LAYOUTS = {
     { id: 'lower-reactor', role: 'reactor', x: .18, y: -1.65, r: .26, maxHp: 90, breakDamage: 55 },
   ],
 };
+export const BOSS_CORE_RADIUS = { gatekeeper: .22, cathedral: .28 };
+export const bossCoreOpen = e => !!e.parts?.length && e.parts.every(p => p.broken);
 export const createBossParts = type => (BOSS_PART_LAYOUTS[type] || []).map(part => ({ ...part, hp: part.maxHp, flash: 0, broken: false }));

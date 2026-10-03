@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Art as BaseArt } from './art.js';
-import { BOSS_PART_LAYOUTS } from './boss-parts.js';
+import { BOSS_PART_LAYOUTS, BOSS_CORE_RADIUS } from './boss-parts.js';
 const C={white:0xbacbd0,edge:0x8eabb4,ink:0x111e28,steel:0x40596b,copper:0x885648,gold:0xbd9870,cyan:0x70e9ee,hot:0xff7149};
 // Angular armored machines: etched alloy, recessed machinery, restrained energy channels.
 export class Art extends BaseArt {
@@ -73,9 +73,14 @@ export class Art extends BaseArt {
     this.part(body,this.box,0xffeee0,[-r*.12,-r*.12,r*.57],[r*.66,r*.036,r*.025],[0,0,0],true);
     this.merge(body);
     const core=this.part(node,this.box,0xff9a50,[-r*.13,0,r*.49],[r*.93,r*.30,r*.06],[0,0,0],true);core.name='weak-core';
+    const marker=new THREE.Group();marker.name='target-marker';
+    for(let i=0;i<4;i++){const a=i*Math.PI/2;this.part(marker,new THREE.TorusGeometry(r*1.12,r*.045,3,12,Math.PI*.30),0x8efce2,[0,0,r*.62],[1,1,1],[0,0,a+.14],true);}
+    node.add(marker);
+    for(let i=0;i<4;i++){const tick=this.part(node,this.box,0x8efce2,[(i-1.5)*r*.38,-r*1.3,r*.62],[r*.27,r*.10,r*.06],[0,0,0],true);tick.name='integrity-'+i;}
     const wreck=new THREE.Group();wreck.name='socket-'+id;wreck.position.set(x,y,.12);wreck.visible=false;
     this.armor(wreck,points,C.ink,r*.30,0);
-    for(let i=0;i<4;i++){this.part(wreck,this.box,C.steel,[(i-1.5)*r*.3,0,r*.12],[r*.13,r*.85,r*.15],[0,0,.18]);this.part(wreck,this.box,0xe45631,[(i-1.5)*r*.3,r*(i%2?.17:-.17),r*.21],[r*.065,r*.20,r*.025],[0,0,.18],true);}
+    this.part(wreck,new THREE.CircleGeometry(r*.78,12),0x070b10,[0,0,r*.19],[1,1,1],[0,0,0],true);
+    for(let i=0;i<8;i++){const a=i/8*Math.PI*2;this.part(wreck,this.box,C.steel,[Math.cos(a)*r*.86,Math.sin(a)*r*.86,r*.21],[r*.26,r*.35,r*.14],[.2,-.25,a],false);this.part(wreck,this.box,0xb94e27,[Math.cos(a)*r*.65,Math.sin(a)*r*.65,r*.22],[r*.08,r*.22,r*.03],[0,0,a],true);}
     this.merge(wreck);g.add(wreck,node);return node;
   }
   tube(g,points,r,color,glow=false){return this.part(g,new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(...p))),Math.min(192,Math.max(24,points.length*2)),r,8,false),color,[0,0,0],[1,1,1],[0,0,0],glow);}
@@ -256,7 +261,11 @@ export class Art extends BaseArt {
     }
     this.part(h,this.box,0xffead6,[0,-r*.085,.45],[r*.18,r*.024,.019],[0,0,0],true);
     this.merge(h);
-    const core=this.part(g,new THREE.CylinderGeometry(1,1,1,6),0xffb782,[0,0,.32],[r*.19,r*.10,r*.19],[Math.PI/2,0,0],true);core.name='core';
+    const cr=BOSS_CORE_RADIUS[type],core=this.part(g,new THREE.CylinderGeometry(1,1,1,12),0xffb782,[0,0,.49],[cr,.08,cr],[Math.PI/2,0,0],true);core.name='core';
+    const shutter=new THREE.Group();shutter.name='core-shutter';
+    for(const side of [-1,1]){const leaf=new THREE.Group();leaf.userData.side=side;leaf.position.y=side*cr*.52;this.armor(leaf,[[-cr*1.16,-cr*.52],[cr*1.16,-cr*.52],[cr*1.16,cr*.52],[-cr*1.16,cr*.52]],C.steel,.08,.58);this.part(leaf,this.box,C.ink,[0,0,.68],[cr*1.9,cr*.15,.025]);this.part(leaf,this.box,0xffa355,[0,0,.70],[cr*.62,cr*.12,.02],[0,0,0],true);shutter.add(this.merge(leaf));}
+    g.add(shutter);
+    const aim=new THREE.Group();aim.name='core-target';for(let i=0;i<4;i++)this.part(aim,new THREE.TorusGeometry(cr*1.18,.014,3,12,Math.PI*.32),0x8efce2,[0,0,.73],[1,1,1],[0,0,i*Math.PI/2],true);g.add(aim);
     this.models.set(key,g);return g.clone(true);
   }
   setpiece(name){

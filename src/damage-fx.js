@@ -43,3 +43,13 @@ export function createReactorMaterial(axis='xz'){
   material.customProgramCacheKey=()=> 'rift-reactor-'+axis;
   return material;
 }
+
+// One bounded plume per destroyed socket, behind hostile bullets in render order.
+export function createSocketSmoke(plane,seed){
+ return new THREE.Mesh(plane,new THREE.ShaderMaterial({transparent:true,depthTest:false,depthWrite:false,side:THREE.DoubleSide,toneMapped:false,uniforms:{time:{value:0},seed:{value:seed}},vertexShader:'varying vec2 uv0;void main(){uv0=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',fragmentShader:`
+ varying vec2 uv0;uniform float time;uniform float seed;
+ float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+ float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
+ void main(){float y=uv0.y;float x=(uv0.x-.5)*2.0+sin(y*7.0-time*1.1+seed)*y*.22;float width=.12+y*.60;float n=noise(vec2(x*8.0,y*6.0-time*1.2)+seed);float silhouette=1.0-smoothstep(width*.38,width,abs(x)+(n-.5)*.22);float alpha=silhouette*(1.0-smoothstep(.35,1.0,y))*smoothstep(0.0,.08,y)*(.42+n*.35);vec3 color=mix(vec3(.055,.065,.073),vec3(.43,.46,.47),n*.5+smoothstep(width*.3,width,abs(x))*.5);color=mix(vec3(.55,.16,.035),color,smoothstep(.02,.20,y));if(alpha<.015)discard;gl_FragColor=vec4(color,alpha);}
+ ` }));
+}

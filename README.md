@@ -20,7 +20,7 @@ Room fit is manual: this version does not scan walls, request room meshes, or oc
 
 The fleet uses angular alloy hulls, raised armor, etched panel textures, recessed vents, and distinct silhouettes. Hits briefly illuminate the struck ship while preserving dark machinery recesses. Surface impacts produce textured fireballs and sparks; destroyed components tumble into the room as decorative debris.
 
-Gatekeeper has two destructible weapon pods; Cathedral has two weapon pods and two outer reactors. Shooting these modules damages the boss, and breaking them awards a structural damage bonus and score. Destroyed weapon pods weaken selected attacks. Animated energy cells identify intact targets, damaged cells sputter, and broken modules leave exposed sockets. The central core remains vulnerable throughout, so parts are an optional tactical route. The weapon and movement rules remain two-dimensional.
+Gatekeeper requires destroying both weapon pods; Cathedral requires destroying two weapon pods and two outer reactors. Mint brackets and four integrity ticks identify these vulnerable modules. Armor rejects shots with a metallic ricochet; only the struck module flashes, and depleted modules explode, detach, and leave charred sockets with continuous smoke. Once every module is destroyed, the central shutters retract to expose a smaller reactor that must be hit to finish the boss. Missiles seek surviving modules and then the exposed core. Bombs weaken modules but cannot bypass the core lock. The weapon and movement rules remain two-dimensional.
 
 ## Controls
 

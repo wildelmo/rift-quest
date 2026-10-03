@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
-import { BOSS_PART_LAYOUTS } from '../src/boss-parts.js';
+import { steerMissile } from '../src/arsenal.js';
+import { BOSS_PART_LAYOUTS, BOSS_CORE_RADIUS, bossCoreOpen } from '../src/boss-parts.js';
 const arena = (mini = true) => {
   const g = new Game(); g.nextWave = g.nextPickup = g.nextCurtain = 99999;
   g.miniSpawned = g.bossSpawned = true; g.spawnBoss(mini);
@@ -10,6 +11,7 @@ const arena = (mini = true) => {
 };
 const fireAt = (g, x, y, damage = 1, kind = 'pulse', radius = .04) => {
   const s = g.addShot(x - .6, y, 30, 0, false, damage, kind, radius);
+  if(kind==='missile')Object.assign(s,{trail:[],turnRate:2.6,age:0});
   g.update(1 / 30); return s;
 };
 test('boss sockets are independent instances with physical targets outside the core', () => {
@@ -47,18 +49,26 @@ test('breaking a socket awards its structural bonus once and leaves the core bea
   assert.equal(broken.partId,p.id); assert.equal(broken.localX,p.x);
   const hp=e.hp; fireAt(g,e.x+p.x,p.y,100);
   assert.equal(e.hp,hp); assert.equal(g.score,200);
+  fireAt(g,e.x,0,99999);assert.ok(!e.dead);g.damageBossPart(e,e.parts[1],99999);assert.ok(!e.dead);
   fireAt(g,e.x,0,99999); assert.equal(e.dead,true); assert.equal(g.boss,null);
 });
-test('bosses can be defeated through the core without breaking optional parts', () => {
-  const { g,e }=arena(false); fireAt(g,e.x,0,e.maxHp);
-  assert.equal(g.state,'won'); assert.ok(e.parts.every(p=>!p.broken));
+test('locked core and hull reject every weapon; all seals must break before the small core opens', () => {
+  for(const mini of [true,false]){
+    const {g,e}=arena(mini);const hp=e.hp;
+    for(const kind of ['pulse','lance','ring','missile','vector','rail','spread']){const s=fireAt(g,e.x,0,99999,kind);g.shots=[];assert.equal(e.hp,hp,kind);}
+    g.player.y=0;g.player.charge=1.4;g.releaseCharge();g.damageEnemy(e,99999);assert.equal(e.hp,hp);
+    for(const p of e.parts){g.damageBossPart(e,p,99999);assert.ok(!e.dead,'overkill on a seal must not skip the core');}
+    assert.equal(bossCoreOpen(e),true);const exposed=e.hp;
+    fireAt(g,e.x,e.r*.72,99999);assert.equal(e.hp,exposed,'armor still blocks shots after core opens');
+    fireAt(g,e.x,0,exposed);assert.equal(e.dead,true);assert.ok(g.drainEvents().some(v=>v.type==='coreOpen'));
+  }
 });
 test('ring socket collision remains annular and remembers each pierced target once', () => {
   const {g,e}=arena(false),p=e.parts[3];
-  const s=g.addShot(e.x+p.x,e.y+p.y,0,0,false,2,'ring',.71);
+  let s=g.addShot(e.x+p.x,e.y+p.y,0,0,false,2,'ring',.71);
   Object.assign(s,{age:2,level:3,pierce:5,stroke:.04,hits:[]});
   g.update(0); assert.equal(p.hp,p.maxHp); // Socket sits inside the ring's hollow center.
-  s.x=e.x+p.x-.71; s.y=e.y+p.y; g.update(0);
+  s=g.addShot(e.x+p.x-.71,e.y+p.y,0,0,false,2,'ring',.71);Object.assign(s,{age:2,level:3,pierce:5,stroke:.04,hits:[]});g.update(0);
   assert.equal(p.hp,p.maxHp-2); assert.ok(s.hits.includes(e.id+':'+p.id));
   for(let i=0;i<10;i++)g.update(0);
   assert.equal(p.hp,p.maxHp-2);
@@ -67,7 +77,7 @@ test('a charge can deliberately hit an outboard pod and bombs damage surviving s
   const {g,e}=arena(false),p=e.parts[0];g.player.y=p.y;g.player.charge=1.4;
   g.releaseCharge();assert.equal(p.hp,p.maxHp-38);assert.equal(e.hp,e.maxHp-38);
   assert.equal(e.parts[1].hp,e.parts[1].maxHp);
-  const before=e.hp;g.bomb();assert.equal(e.hp,before-35);assert.equal(p.hp,p.maxHp-50);
+  const before=e.hp;g.bomb();assert.equal(e.hp,before);assert.equal(p.hp,p.maxHp-50);
   assert.equal(e.parts[1].hp,e.parts[1].maxHp-12);
 });
 test('part collisions are swept on the combat plane and vanish once broken', () => {
@@ -102,4 +112,20 @@ test('oblique projectile sparks land on the actual struck surface rather than hu
   assert.ok(impact.x<x);assert.ok(impact.y>y);
   const slope=(impact.y-y)/(impact.x-x);
   assert.ok(Math.abs(slope-(-.5/.6))>.1); // Impact uses segment entry, not its starting direction.
+});
+
+
+test('missiles steer to surviving seals and reacquire the exposed core',()=>{
+ const {g,e}=arena(false);const s=g.addShot(0,1.1,6.2,0,false,.6,'missile',.048);Object.assign(s,{age:.2,turnRate:2.6,trail:[]});
+ steerMissile(g,s,1/90);assert.equal(s.target,e.id);assert.equal(s.targetPart,e.id+':upper-pod');
+ g.damageBossPart(e,e.parts[0],9999);steerMissile(g,s,1/90);assert.notEqual(s.targetPart,e.id+':upper-pod');
+ for(const p of e.parts)g.damageBossPart(e,p,9999);steerMissile(g,s,1/90);assert.equal(s.targetPart,e.id);
+});
+test('bombs weaken seals but never bypass their protection; an open core can be bombed',()=>{
+ const {g,e}=arena();g.bombs=5;const hp=e.hp;g.bomb();assert.equal(e.hp,hp);assert.ok(e.parts.every(p=>p.hp===20));
+ for(const p of e.parts)g.damageBossPart(e,p,p.hp);const open=e.hp;g.bomb();assert.equal(e.hp,open-35);
+});
+test('exposed Gatekeeper retains a central attack after both weapon pods are destroyed',()=>{
+ const {g,e}=arena();for(const p of e.parts)g.damageBossPart(e,p,p.hp);delete g.bossTick;e.hp=e.maxHp*.5;e.phase=2;e.fire=0;e.recovery=0;e.spiral=100;
+ g.bossTick(e,0);assert.equal(g.shots.filter(s=>s.hostile).length,7);
 });

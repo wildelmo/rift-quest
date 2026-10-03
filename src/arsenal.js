@@ -1,6 +1,6 @@
 // Combat remains on the same plane. Decorative depth never participates in targeting.
 export const LOOT_ROUTE=['VECTOR','MISSILE','RING','SHIELD','ECHO','RING','LANCE','VECTOR','MISSILE','SPREAD','LANCE','BOMB'];
-export const PICKUP_INFO={VECTOR:'Stackable side guns · diagonal coverage above and below.',MISSILE:'Stackable seekers · hold fire for a steady homing salvo.',RING:'Expanding annular waves · pierce formations through the rim.',LANCE:'Forward ion lance · longer core, twin rails, armor penetration.',SPREAD:'Wide fan blaster · cover the approach.',ECHO:'Your flight path, delayed · a second firing position.',SHIELD:'Two shield charges · repair one hull point.',BOMB:'One pulse bomb · clear the tide.'};
+export const PICKUP_INFO={VECTOR:'Stackable side guns · diagonal coverage above and below.',MISSILE:'Stackable seekers · hold fire for a steady homing salvo.',RING:'Expanding annular waves · pierce formations through the rim.',LANCE:'Forward ion lance · piercing shots, twin rails, precise weak-point fire.',SPREAD:'Wide fan blaster · cover the approach.',ECHO:'Your flight path, delayed · a second firing position.',SHIELD:'Two shield charges · repair one hull point.',BOMB:'One pulse bomb · clear the tide.'};
 export function firePrimary(g,x,y,echo=false){
  const p=g.player,l=p.level,scale=echo?.45:1;
  if(p.weapon==='RING'){
@@ -38,7 +38,10 @@ export function steerMissile(g,s,dt){
  const eligible=e=>!e.dead&&e.entry<=0&&Math.abs(e.x)<9&&Math.abs(e.y)<5;
  let target=g.enemies.find(e=>e.id===s.target&&eligible(e));
  if(!target){target=g.enemies.filter(eligible).sort((a,b)=>Math.hypot(a.x-s.x,a.y-s.y)-Math.hypot(b.x-s.x,b.y-s.y))[0];s.target=target?.id||null;}
- if(target&&s.age>.14){const angle=Math.atan2(s.vy,s.vx),aim=Math.atan2(target.y-s.y,target.x-s.x);const delta=Math.atan2(Math.sin(aim-angle),Math.cos(aim-angle)),turn=Math.max(-s.turnRate*dt,Math.min(s.turnRate*dt,delta));s.vx=Math.cos(angle+turn)*6.2;s.vy=Math.sin(angle+turn)*6.2;}
+ let aimTarget=target;
+ if(target?.maxHp){const points=g.projectileTargets(target).filter(t=>!t.armor);aimTarget=points.find(t=>t.hitId===s.targetPart)||points.sort((a,b)=>Math.hypot(a.x-s.x,a.y-s.y)-Math.hypot(b.x-s.x,b.y-s.y))[0];s.targetPart=aimTarget?.hitId??null;}
+ else s.targetPart=null;
+ if(aimTarget&&s.age>.14){const angle=Math.atan2(s.vy,s.vx),aim=Math.atan2(aimTarget.y-s.y,aimTarget.x-s.x);const delta=Math.atan2(Math.sin(aim-angle),Math.cos(aim-angle)),turn=Math.max(-s.turnRate*dt,Math.min(s.turnRate*dt,delta));s.vx=Math.cos(angle+turn)*6.2;s.vy=Math.sin(angle+turn)*6.2;}
  s.trail.push({x:s.x,y:s.y,life:.28});for(const point of s.trail)point.life-=dt;s.trail=s.trail.filter(p=>p.life>0).slice(-26);
 }
 export function ringHits(s,e){

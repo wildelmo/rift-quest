@@ -1,4 +1,4 @@
-import { createBossParts } from './boss-parts.js';
+import { createBossParts, BOSS_CORE_RADIUS, bossCoreOpen } from './boss-parts.js';
 import { DIFFICULTIES } from './menu.js';
 import { firePrimary, fireModules, steerMissile, ringHits, LOOT_ROUTE, PICKUP_INFO } from './arsenal.js';
 // All combat coordinates are 2D. Depth belongs exclusively to presentation.
@@ -67,7 +67,7 @@ export class Game {
       hp: mini ? 280 : 1350, maxHp: mini ? 280 : 1350, fire: 2.4, entry: 3, phase: 1, pattern: 0, warning: 0, laser: 0, laserY: 0, spiral:.15, corridor:3 };
     boss.parts = createBossParts(boss.type);
     this.enemies.push(boss); this.boss = boss;
-    this.announce(mini ? 'GATEKEEPER APPROACHING' : 'THE CATHEDRAL', mini ? 'Break its weapon pods. Strike the exposed core.' : 'Fracture the glowing weapon pods and reactors.');
+    this.announce(mini ? 'GATEKEEPER APPROACHING' : 'THE CATHEDRAL', mini ? 'Destroy both marked weapon pods to open the core.' : 'Destroy all four marked modules to open the core.');
     this.emit('boss', { mini });
     this.shots=this.shots.filter(s=>!s.hostile);
   }
@@ -92,7 +92,8 @@ export class Game {
   }
   damageEnemy(e, amount, impact = {}) {
     if (e.dead || e.entry > 0) return;
-    e.hp -= amount; e.flash = .11;
+    if(e.maxHp&&!impact.partId&&(!impact.core||!bossCoreOpen(e))) {this.armorHit(e,impact);return;}
+    e.hp = impact.partId&&e.maxHp?Math.max(1,e.hp-amount):e.hp-amount; if(!impact.partId)e.flash = .11;
     if (!impact.silent) this.emit('impact', { x: impact.x ?? e.x, y: impact.y ?? e.y, enemyId: e.id, partId: impact.partId ?? null, boss: !!e.maxHp, damageFraction: clamp(1 - e.hp / (e.maxHp || e.initialHp || e.hp + amount), 0, 1) });
     if (e.hp <= 0) {
       e.dead = true; this.kills++; this.score += e.maxHp ? (e.type === 'cathedral' ? 10000 : 2500) : e.type === 'carrier' ? 250 : 100;
@@ -102,25 +103,31 @@ export class Game {
       if (e.type === 'cathedral') { this.boss = null; this.shots = []; this.state = 'won'; this.emit('end', { won: true }); }
     }
   }
+  armorHit(e,hit={}) {
+    if(e.dead||e.entry>0||this.time<(e.nextArmorHit||0))return;
+    e.nextArmorHit=this.time+.08;this.emit('armorHit',{enemyId:e.id,x:hit.x??e.x-BOSS_CORE_RADIUS[e.type],y:hit.y??e.y});
+  }
   damageBossPart(e, part, amount, impact = {}, transfer = true) {
     if (e.dead || e.entry > 0 || part.broken) return;
-    part.hp = Math.max(0, part.hp - amount); part.flash = .14;
+    const applied=Math.min(part.hp,amount);part.hp = Math.max(0, part.hp - amount); part.flash = .14;
     const hit = { x: impact.x ?? e.x + part.x, y: impact.y ?? e.y + part.y, partId: part.id };
     if (part.hp <= 0) {
-      part.broken = true;
+      part.broken = true;part.brokenAt=this.time;
       this.score += e.type === 'cathedral' ? 400 : 200;
       this.emit('partBreak', { enemyId: e.id, partId: part.id, id: part.id, x: e.x + part.x, y: e.y + part.y, localX: part.x, localY: part.y, r: part.r, archetype: e.type, role: part.role });
       this.burst(e.x + part.x, e.y + part.y, 'orange', .9);
     }
     // Localized impact feedback is emitted once; structural bonus does not fake another hit.
     this.emit('impact', { ...hit, enemyId: e.id, boss: true, damageFraction: 1 - part.hp / part.maxHp });
-    this.damageEnemy(e, (transfer ? amount : 0) + (part.broken ? part.breakDamage : 0), { ...hit, silent: true });
+    this.damageEnemy(e, (transfer ? applied : 0) + (part.broken ? part.breakDamage : 0), { ...hit, silent: true });
+    if(part.broken&&bossCoreOpen(e)){this.announce('CORE EXPOSED','Armor seals destroyed. Aim for the small central reactor.');this.emit('coreOpen',{enemyId:e.id,x:e.x,y:e.y});e.recovery=Math.max(e.recovery||0,1.2);e.fire=Math.max(e.fire,1.2);}
   }
   projectileTargets(e) {
     // Every projectile reuses the same target objects: no per-shot arrays or maps.
     const cache = e._combatTargetCache ||= {
       parts: (e.parts || []).map(part => ({ x: 0, y: 0, r: part.r, part, hitId: e.id + ':' + part.id })),
-      core: { x: 0, y: 0, r: e.r, hitId: e.id }, active: [],
+      core: { x: 0, y: 0, r: e.r, hitId: e.id },
+      armor: e.maxHp ? [{dx:0,dy:-e.r*.72,r:e.r*.37},{dx:0,dy:e.r*.72,r:e.r*.37},{dx:e.r*.95,dy:0,r:e.r*.42}].map((p,i)=>({...p,armor:true,hitId:e.id+':armor'+i})) : [], active: [],
     };
     const targets = cache.active; targets.length = 0;
     for (const target of cache.parts) {
@@ -129,8 +136,10 @@ export class Game {
       target.x = e.x + part.x; target.y = e.y + part.y; target.r = part.r;
       targets.push(target);
     }
-    cache.core.x = e.x; cache.core.y = e.y; cache.core.r = e.r;
+    cache.core.x = e.x; cache.core.y = e.y; cache.core.r = e.maxHp?BOSS_CORE_RADIUS[e.type]:e.r;
+    cache.core.armor=!!e.maxHp&&!bossCoreOpen(e);cache.core.core=!!e.maxHp;
     targets.push(cache.core);
+    for(const plate of cache.armor){plate.x=e.x+plate.dx;plate.y=e.y+plate.dy;targets.push(plate);}
     return targets;
   }
   shootPlayer() {
@@ -148,8 +157,9 @@ export class Game {
       let transferred = false;
       for (const target of targets) {
         const hit = { x: target.x - target.r, y: clamp(p.y, target.y - target.r, target.y + target.r) };
+        if(target.armor){this.armorHit(e,hit);continue;}
         if (target.part) this.damageBossPart(e, target.part, 8 + 30 * strength, hit, !transferred);
-        else if (!transferred) this.damageEnemy(e, 8 + 30 * strength, hit);
+        else if (!transferred) this.damageEnemy(e, 8 + 30 * strength, {...hit,core:target.core});
         transferred = true;
       }
     }
@@ -159,7 +169,7 @@ export class Game {
   bomb() {
     if (!this.bombs) return;
     this.bombs--; for(const s of this.shots.filter(s=>s.hostile).filter((_,i)=>i%4===0).slice(0,60))this.burst(s.x,s.y,'mint',.25);this.shots = this.shots.filter(s => !s.hostile); this.player.invincible = Math.max(1.5, this.player.invincible);
-    for (const e of this.enemies) { for (const part of e.parts || []) this.damageBossPart(e, part, 12, {}, false); this.damageEnemy(e, e.maxHp ? 35 : 50); e.warning = 0; e.laser = 0; e.fire = Math.max(e.fire, 1.5); }
+    for (const e of this.enemies) { const open=bossCoreOpen(e);for (const part of e.parts || []) this.damageBossPart(e, part, 12, {}, false); if(!e.maxHp||open)this.damageEnemy(e, e.maxHp ? 35 : 50,{core:open}); e.warning = 0; e.laser = 0; e.fire = Math.max(e.fire, 1.5); }
     this.effects.push({ id: this.nextId++, kind: 'bomb', x: this.player.x, y: this.player.y, age: 0, life: .8 }); this.burst(this.player.x,this.player.y,'mint',3);this.emit('bomb');
   }
   bossTick(e, dt) {
@@ -199,7 +209,7 @@ export class Game {
       e.recovery=1.6;
     }else if(!cathedral&&phase>=2){
       e.attackName=phase===3?'SCISSOR / OVERDRIVE':'SCISSOR';const sides=phase===3?[-1,0,1]:[-1,1];
-      for(const side of sides.filter(side => side === 0 || !e.parts?.find(p => p.id === (side > 0 ? 'upper-pod' : 'lower-pod'))?.broken)){const y=e.y+side*.56,aim=Math.atan2(this.player.y-y,this.player.x-e.x);for(let i=-3;i<=3;i++){const a=aim+i*.14;this.addShot(e.x-.8,y,Math.cos(a)*2.3,Math.sin(a)*2.3,true,1,side?'needle':'petal',.055);}}e.recovery=.65;
+      for(const side of (bossCoreOpen(e)?[0]:sides.filter(side => side === 0 || !e.parts?.find(p => p.id === (side > 0 ? 'upper-pod' : 'lower-pod'))?.broken))){const y=e.y+side*.56,aim=Math.atan2(this.player.y-y,this.player.x-e.x);for(let i=-3;i<=3;i++){const a=aim+i*.14;this.addShot(e.x-.8,y,Math.cos(a)*2.3,Math.sin(a)*2.3,true,1,side?'needle':'petal',.055);}}e.recovery=.65;
     }else if(e.pattern%3===0){
       e.attackName='BLOOM';const count=27;
       for(let layer=0;layer<2;layer++)for(let i=0;i<count;i++){const a=i/count*Math.PI*2+e.age*.12+layer*.06;this.addShot(e.x-.7,e.y,Math.cos(a)*speed*(1-layer*.17),Math.sin(a)*speed*(1-layer*.17),true,1,'orb',.065);}e.recovery=.6;
@@ -282,8 +292,9 @@ export class Game {
           const t=s.kind !== 'ring' && a>0 && c>0 && discriminant>=0 ? clamp((-b-Math.sqrt(discriminant))/(2*a),0,1) : 0;
           const dx=sx+vx*t, dy=sy+vy*t, length=Math.hypot(dx,dy)||1;
           const hit={x:target.x+dx/length*target.r,y:target.y+dy/length*target.r};
+          if(target.armor){this.armorHit(e,hit);s.life=0;break;}
           if (target.part) this.damageBossPart(e, target.part, s.damage, hit);
-          else this.damageEnemy(e, s.damage, hit);
+          else this.damageEnemy(e, s.damage, {...hit,core:target.core});
           (s.hits ||= []).push(target.hitId); s.pierce=(s.pierce||1)-1;
           if (s.pierce<=0) { s.life=0; break; }
         }
