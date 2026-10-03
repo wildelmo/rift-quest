@@ -111,6 +111,7 @@ export class EnemyBullets {
     const head = this.headPos;
     const live = this.live;
     let w = 0;
+    let hit = null;
     for (let i = 0; i < live.length; i++) {
       const b = live[i];
       b.age += dt;
@@ -163,7 +164,7 @@ export class EnemyBullets {
         if (ship.vulnerable && d2 < hr * hr) {
           b.alive = false;
           this.free.push(b);
-          cb.onHit(b);
+          hit = hit || b; // resolved after the loop: the hit handler may clear bullets
           continue;
         }
         const gr = ship.grazeRadius + b.radius;
@@ -175,6 +176,7 @@ export class EnemyBullets {
       live[w++] = b;
     }
     live.length = w;
+    if (hit) cb.onHit(hit);
 
     // Score stars drift, then home into the ship
     const st = this.stars;

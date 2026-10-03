@@ -44,3 +44,19 @@ test('every rift slot has a direction, fallback distance and radius', () => {
     assert.ok(s.dist > 1 && s.radius > 0);
   }
 });
+
+test('a hit handler that clears bullets does not corrupt the bullet list', async () => {
+  const THREE = await import('three');
+  const { EnemyBullets } = await import('../src/game/bullets.js');
+  const b = new EnemyBullets(new THREE.Group());
+  // bullets that miss come first in the list, so a mid-loop clear would leave holes behind them
+  for (let i = 0; i < 10; i++) b.spawn(0.3, 0, -0.5, 0, 0, 0.1, 'small');
+  for (let i = 0; i < 20; i++) b.spawn(0, 0, -0.05 - i * 0.002, 0, 0, 0.5, 'small');
+  let hits = 0;
+  const ship = { x: 0, y: 0, z: 0, radius: 0.006, grazeRadius: 0.03, vulnerable: true, active: true, present: true };
+  b.update(0.2, ship, { onHit: () => { hits++; b.cancelAll(false); }, onGraze() {}, onStar() {} });
+  assert.equal(hits, 1);
+  assert.ok(b.live.every((x) => x && x.alive));
+  b.update(0.016, ship, { onHit() {}, onGraze() {}, onStar() {} });
+  assert.ok(b.live.every((x) => x && x.alive));
+});
