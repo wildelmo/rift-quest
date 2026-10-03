@@ -190,9 +190,9 @@ function readInput(dt, now, frame) {
   if(settings.controls==='motion'){
     const sample=view.controllerSample(frame,rightSource);
     if(!sample?.tracked){setPaused(true);message={title:'CONTROLLER TRACKING LOST',subtitle:'Return the right controller to view, then resume.'};messageUntil=now+3;return {};}
-    if(!sample.point){motionPilot.reset();motionCue={origin:sample.origin,valid:false};return {...input,x:0,y:0};}
-    const target=motionPilot.update(sample.point,game.player,dt,{focus:input.focus||input.charge,clutch:b(right,3),reach:settings.motionReach});
-    motionCue={origin:sample.origin,valid:true,clutch:b(right,3)};input.target=target;input.x=input.y=0;
+    if(!sample.point){motionPilot.reset();motionCue={...sample,valid:false};return {...input,x:0,y:0};}
+    const target=motionPilot.update(sample.point,game.player,dt,{focus:input.focus||input.charge,clutch:b(right,3),steadiness:settings.motionReach});
+    motionCue={...sample,valid:!!target,clutch:b(right,3)};input.target=target;input.x=input.y=0;
   }
   return input;
 }

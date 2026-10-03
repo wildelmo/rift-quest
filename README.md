@@ -23,8 +23,8 @@ Room fit is manual: this version does not scan walls, request room meshes, or oc
 | Move | Point right controller (default); left stick in Thumbstick mode | WASD / arrows |
 | Fire | Right trigger | Space |
 | Charge / release lance | Right grip | Shift |
-| Precision focus / show hitbox | Left grip; reduces motion reach to 35% | Ctrl |
-| Reset hand position without moving ship | Hold right thumbstick button | — |
+| Precision focus / show hitbox | Left grip; steadier aim and slower movement | Ctrl |
+| Hold ship position | Hold right thumbstick button | — |
 | Pulse bomb | A | E |
 | Pause | B | P / Escape |
 | Resume | Select Resume, right trigger / B | Resume / P |
@@ -37,17 +37,17 @@ Focus reduces movement range and reveals the exact hitbox. Full charge takes 1.4
 
 ## Motion controls
 
-Controller aim is the default on Quest. Point and move the right controller to guide the ship along the anchored flight plane. A fine outlined light tether and faint widening cone connect the controller to the actual ship. They are decorative and draw below hostile projectile marks. Controller movement toward/away from the plane never moves combat out of 2D.
+Controller aim is the default on Quest. The right controller projects a fixed ray along its pointing direction. A small crosshair marks its exact intersection with the anchored flight plane, and the ship moves toward that absolute destination. The ray follows the controller orientation even while the ship is catching up or held still. It never bends toward the ship, and no hand-to-ship offset is calibrated.
 
-This is relative guidance: the hand is calibrated to the current ship when deploying, resuming, or changing settings. It does not snap the ship to the pointing ray. Slow hand movement receives more filtering than deliberate sweeps. Hold the left grip for 35% motion gain and the visible hitbox. Hold the right thumbstick button while repositioning your hand; the ship stays still, then continues from that hand position when released. Motion reach changes how far a gesture moves the ship. Trigger fire, charged lance, and bombs retain their buttons.
+Slow hand movement receives more filtering than deliberate sweeps. Left grip adds steadier filtering, slows the ship, and shows the hitbox without changing the destination or controller angle. Aim steadiness (60–160%) adjusts filtering only. Hold the right thumbstick button to hold the ship still; releasing it resumes movement toward the current crosshair. Trigger fire, charged lance, and bombs retain their buttons.
 
-Missing or emulated controller tracking pauses play and audio. A valid tracked controller pointed away from the flight plane temporarily holds movement and hides the guide; returning recalibrates without jumping. The ship has a movement speed limit, and relative swept collision detects hazards crossed by fast movements. Thumbstick mode remains available and has a gentler central response curve. Menus continue to use the left stick.
+Pointing outside the playable rectangle, behind the plane, or nearly parallel to it holds the ship in place. The ray turns amber until a valid destination returns, instead of forcing the ship into a corner. Missing or emulated tracking pauses play and audio. Resuming moves toward the current ray intersection with a bounded speed; there is no instantaneous teleport or recalibrated offset. Relative swept collision detects hazards crossed by fast movement. Thumbstick mode remains available with a gentler central response curve; menus use the left stick.
 
 The implementation uses the preferred pointing pose from [WebXR targetRaySpace](https://www.w3.org/TR/webxr/#dom-xrinputsource-targetrayspace), transformed into the actual scaled/rotated arena. Controller aim and tether geometry were verified through a simulated XR transport, not a physical headset. Actual precision, fatigue, controller feel, and passthrough visibility require a Quest playtest.
 
 ## Pause settings and full exit
 
-The desktop and in-headset menus provide master volume, music volume, **Casual / Arcade / Expert** difficulty, **Controller aim / Thumbstick** controls, and motion reach (60–160%). Settings persist between visits and apply during a flight. Casual slows hostile bullets, widens safe corridors, reduces firing cadence, and grants longer protection after a hit. Arcade preserves the original balance. Expert increases hostile speed/cadence and tightens corridors. Ship movement, hitbox, player weapon speed, and beam warnings remain unchanged. Difficulty changes rescale existing hostile velocities without teleporting them or repairing the player.
+The desktop and in-headset menus provide master volume, music volume, **Casual / Arcade / Expert** difficulty, **Controller aim / Thumbstick** controls, and aim steadiness (60–160%). Settings persist between visits and apply during a flight. Casual slows hostile bullets, widens safe corridors, reduces firing cadence, and grants longer protection after a hit. Arcade preserves the original balance. Expert increases hostile speed/cadence and tightens corridors. Ship movement, hitbox, player weapon speed, and beam warnings remain unchanged. Difficulty changes rescale existing hostile velocities without teleporting them or repairing the player.
 
 Pause suspends the AudioContext. App/tab visibility loss also stops game rendering; returning shows the paused state and does not restart audio automatically. Return to hangar closes the old audio context, and starting another flight creates a fresh one.
 
@@ -100,14 +100,14 @@ The main branch deploys through .github/workflows/deploy.yml. Pages Source is Gi
 - src/view.js: instancing, shaders, motion, anchored arena, collision markers, and in-headset HUD.
 - src/main.js: desktop/XR lifecycle, controllers, room fit, pause, fixed simulation, and accessible menus.
 - src/audio.js / src/sound-bank.js: PCM effects, adaptive music, scheduling, voice management, ducking, and mixing.
-- src/motion.js: relative pointer calibration, adaptive smoothing, precision gain, and thumbstick curve.
+- src/motion.js: absolute ray destinations, adaptive smoothing, hold position, and thumbstick curve.
 - src/menu.js: validated saved settings and controller-operated pause menu.
 - tests/game.test.js / tests/menu.test.js / tests/arsenal.test.js / tests/motion.test.js: 39 checks covering collision, progression, power-ups, budgets, phase isolation/recovery, act deferral, and deterministic stress.
 - tests/render-check.cjs / tests/audio-check.cjs / tests/showcase-check.cjs: optional isolated Chrome scene, busy mix, composited motion, and lifecycle verification. Use Playwright through NODE_PATH; scene/audio checks accept RIFT_BROWSER.
 
 The optional tests/lifecycle-check.cjs checks pause/audio suspension, saved settings, difficulty, hangar/reentry, hidden-page rendering, complete shutdown, blocked/allowed tab closure, simulated XR controller and session events, failure cleanup, and audio-resume races. Its fake XR transport is not a physical headset test.
 
-The optional tests/motion-render-check.cjs verifies real input handling and guide geometry through a fake XR transport: scaled/rotated placement, no initial/resume snapping, precision transitions, hand reset, tracking-loss pause, mode switching, and full disposal.
+The optional tests/motion-render-check.cjs verifies real input handling and guide geometry through a fake XR transport: scaled/rotated placement, controller/ray alignment, crosshair position, repeated focus/hold/pause transitions without accumulated offsets, out-of-bounds hold, tracking-loss pause, mode switching, and full disposal.
 
 ## Validation and limits
 

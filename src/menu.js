@@ -18,7 +18,7 @@ export class PauseMenu {
       { id: 'musicVolume', label: 'Music volume', value: `${Math.round(settings.musicVolume * 100)}%` },
       { id: 'difficulty', label: 'Difficulty', value: DIFFICULTIES[settings.difficulty].label },
       { id: 'controls', label: 'Ship controls', value: settings.controls==='stick'?'Thumbstick':'Controller aim' },
-      { id: 'motionReach', label: 'Motion reach', value: `${Math.round(settings.motionReach*100)}%` },
+      { id: 'motionReach', label: 'Aim steadiness', value: `${Math.round(settings.motionReach*100)}%` },
       { id: 'width', label: 'Arena width', value: `${(settings.width * 3.28084).toFixed(1)} ft` },
       { id: 'distance', label: 'Plane distance', value: `${(settings.distance * 3.28084).toFixed(1)} ft` },
       { id: 'recenter', label: 'Recenter arena', value: 'X' },
