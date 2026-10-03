@@ -127,7 +127,10 @@ export class Game {
       if (e.warning <= 0) { e.laser = .8; this.emit('laser',{x:e.x,y:e.laserY}); }
     } else if (e.laser > 0) {
       e.laser -= dt;
-      if (this.player.x < e.x && Math.abs(this.player.y - e.laserY) < .15 + this.player.r) this.hurtPlayer();
+      const p=this.player,start=this.playerStart||p,dy=p.y-start.y,half=.15+p.r;
+      const t0=dy?(e.laserY-half-start.y)/dy:0,t1=dy?(e.laserY+half-start.y)/dy:1;
+      const lo=Math.max(0,Math.min(t0,t1)),hi=Math.min(1,Math.max(t0,t1));
+      if((dy||Math.abs(p.y-e.laserY)<half)&&lo<=hi&&Math.min(start.x+(p.x-start.x)*lo,start.x+(p.x-start.x)*hi)<e.x)this.hurtPlayer();
     }
     if(e.entry<=0&&e.warning<=0&&e.laser<=0&&e.recovery<=0&&e.fire>0&&e.pattern%3!==1){
       e.spiral-=dt;e.corridor-=dt;
@@ -168,12 +171,14 @@ export class Game {
     if(this.boss?.type==='gatekeeper')this.bossHold+=dt;const progress=this.time-this.bossHold;const act=progress<90?1:progress<132?2:3;
     if(act!==this.act&&!this.boss){this.act=act;this.shots=this.shots.filter(s=>!s.hostile);this.announce(act===2?'II / THE COPPER FOUNDRY':'III / HEART OF THE MACHINE',act===2?'Armored columns. Fracture their formation.':'The tide turns inward. Stay in the openings.');this.emit('act',{act});}
     for(const [at,name]of [[30,'LEVIATHAN'],[108,'THE PROCESSION'],[150,'THE HELIX']])if(progress>=at&&!this.boss&&!this.setpieces.has(at)){this.setpieces.add(at);this.emit('setpiece',{name,act:this.act});if(at===108)for(let i=0;i<4;i++)this.spawnEnemy('carrier',(i-1.5)*1.7,i);if(at===150)for(let i=0;i<6;i++)this.spawnEnemy('weaver',Math.sin(i*1.2)*3,i);}
-    const p = this.player; p.invincible = Math.max(0, p.invincible - dt); p.cooldown -= dt;p.vectorCooldown-=dt;p.missileCooldown-=dt;
-    let mx = input.x || 0, my = input.y || 0; const length = Math.hypot(mx, my); if (length > 1) { mx /= length; my /= length; }
-    p.focus=!!(input.focus||input.charge);p.moveX=mx;p.moveY=my;
-    const speed = p.focus ? 2.4 : 5.2;
+    const p = this.player; p.invincible = Math.max(0, p.invincible - dt); p.cooldown -= dt;p.vectorCooldown-=dt;p.missileCooldown-=dt;this.playerStart={x:p.x,y:p.y};
+    let mx = input.x || 0, my = input.y || 0;
+    const target=input.target;const direct=target&&Number.isFinite(target.x)&&Number.isFinite(target.y);
+    if(direct){const dx=clamp(target.x,-7.7,7.6)-p.x,dy=clamp(target.y,-4.2,4.2)-p.y,dist=Math.hypot(dx,dy),limit=(input.focus||input.charge?10:18)*dt;const factor=dist?Math.min(1,limit/dist):0;mx=dx*factor/(dt||1);my=dy*factor/(dt||1);} const length = Math.hypot(mx, my); if (!direct&&length > 1) { mx /= length; my /= length; }
+    p.focus=!!(input.focus||input.charge);p.moveX=direct?clamp(mx/8,-1,1):mx;p.moveY=direct?clamp(my/8,-1,1):my;
+    const speed = direct ? 1 : p.focus ? 2.4 : 5.2;
     p.x = clamp(p.x + mx * speed * dt, -7.7, 7.6); p.y = clamp(p.y + my * speed * dt, -4.2, 4.2);
-    this.path.push({time:this.time,x:p.x,y:p.y,moveY:my});
+    this.path.push({time:this.time,x:p.x,y:p.y,moveY:p.moveY});
     while(this.path.length>1&&this.path[1].time<=this.time-.28)this.path.shift();
     const past=this.path[0];this.echoWing={x:past.x-.5,y:past.y,moveY:past.moveY};
     if (input.fire) fireModules(this);
@@ -197,7 +202,7 @@ export class Game {
     const emitters=new Set(this.enemies.filter(e=>!e.maxHp&&e.entry<=0&&e.x>p.x+.8&&e.x<7.7&&e.type!=='dart').sort((a,b)=>a.x-b.x).slice(0,emitterLimit).map(e=>e.id));
     for (const e of this.enemies) {
       if (e.dead) continue;
-      e.age += dt; e.entry -= dt; e.fire -= dt; e.flash = Math.max(0, (e.flash || 0) - dt);
+      const enemyStart={x:e.x,y:e.y};e.age += dt; e.entry -= dt; e.fire -= dt; e.flash = Math.max(0, (e.flash || 0) - dt);
       if (e.maxHp) this.bossTick(e, dt);
       else {
         e.x -= e.speed * dt;
@@ -211,14 +216,14 @@ export class Game {
           this.emit('enemyFire',{x:e.x,y:e.y,heavy:e.type==='carrier'});e.fire=(e.type==='sentinel'?1.55:e.type==='carrier'?2.1:1.85)/this.tuning.cadence;
         }
       }
-      if (e.entry <= 0 && Math.hypot(e.x - p.x, e.y - p.y) < e.r + p.r) this.hurtPlayer();
+      if (e.entry <= 0 && segmentHits(this.playerStart.x-enemyStart.x,this.playerStart.y-enemyStart.y,p.x-e.x,p.y-e.y,0,0,e.r+p.r)) this.hurtPlayer();
     }
     for (const s of this.shots) {
       s.px = s.x; s.py = s.y;s.previousRadius=s.r; s.age=(s.age||0)+dt;
       if(s.kind==='missile')steerMissile(this,s,dt);
       if(s.kind==='ring')s.r=Math.min(.38+s.level*.11,.12+s.age*.55);
       s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt;
-      if (s.hostile) { if (segmentHits(s.px, s.py, s.x, s.y, p.x, p.y, p.r + s.r)) { this.hurtPlayer(); s.life = 0; }
+      if (s.hostile) { if (segmentHits(s.px-this.playerStart.x, s.py-this.playerStart.y, s.x-p.x, s.y-p.y, 0, 0, p.r+s.r)) { this.hurtPlayer(); s.life = 0; }
         else if(!s.grazed&&p.invincible<=0&&Math.hypot(s.x-p.x,s.y-p.y)<.34){s.grazed=true;this.grazes++;this.combo=Math.min(8,this.combo+.25);this.comboTime=4;this.score+=Math.round(10*this.combo);this.emit('graze',{x:p.x,y:p.y});}}
       else for (const e of this.enemies) {
         if (!e.dead && e.entry <= 0 && !s.hits?.includes(e.id) && (s.kind==='ring'?ringHits(s,e):segmentHits(s.px, s.py, s.x, s.y, e.x, e.y, e.r + s.r))) {

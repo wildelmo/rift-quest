@@ -20,10 +20,11 @@ Room fit is manual: this version does not scan walls, request room meshes, or oc
 
 | Action | Quest Touch controllers | Desktop |
 | --- | --- | --- |
-| Move | Left stick | WASD / arrows |
+| Move | Point right controller (default); left stick in Thumbstick mode | WASD / arrows |
 | Fire | Right trigger | Space |
 | Charge / release lance | Right grip | Shift |
-| Precision focus / show hitbox | Left grip | Ctrl |
+| Precision focus / show hitbox | Left grip; reduces motion reach to 35% | Ctrl |
+| Reset hand position without moving ship | Hold right thumbstick button | — |
 | Pulse bomb | A | E |
 | Pause | B | P / Escape |
 | Resume | Select Resume, right trigger / B | Resume / P |
@@ -32,11 +33,21 @@ Room fit is manual: this version does not scan walls, request room meshes, or oc
 | Restart | Right trigger after results | Restart / R |
 | Exit | Pause → Exit game → right trigger; system session exit also shuts down | Pause → Exit game |
 
-Focus slows movement and reveals the exact hitbox. Full charge takes 1.4 seconds; the lance works with every loadout. Bombs clear hostile bullets, cancel boss beams, briefly protect the ship, and damage enemies. Firing is deliberate. Tracking loss, missing controllers, or app visibility loss pauses play.
+Focus reduces movement range and reveals the exact hitbox. Full charge takes 1.4 seconds; the lance works with every loadout. Bombs clear hostile bullets, cancel boss beams, briefly protect the ship, and damage enemies. Firing is deliberate. Tracking loss, missing controllers, or app visibility loss pauses play.
+
+## Motion controls
+
+Controller aim is the default on Quest. Point and move the right controller to guide the ship along the anchored flight plane. A fine outlined light tether and faint widening cone connect the controller to the actual ship. They are decorative and draw below hostile projectile marks. Controller movement toward/away from the plane never moves combat out of 2D.
+
+This is relative guidance: the hand is calibrated to the current ship when deploying, resuming, or changing settings. It does not snap the ship to the pointing ray. Slow hand movement receives more filtering than deliberate sweeps. Hold the left grip for 35% motion gain and the visible hitbox. Hold the right thumbstick button while repositioning your hand; the ship stays still, then continues from that hand position when released. Motion reach changes how far a gesture moves the ship. Trigger fire, charged lance, and bombs retain their buttons.
+
+Missing or emulated controller tracking pauses play and audio. A valid tracked controller pointed away from the flight plane temporarily holds movement and hides the guide; returning recalibrates without jumping. The ship has a movement speed limit, and relative swept collision detects hazards crossed by fast movements. Thumbstick mode remains available and has a gentler central response curve. Menus continue to use the left stick.
+
+The implementation uses the preferred pointing pose from [WebXR targetRaySpace](https://www.w3.org/TR/webxr/#dom-xrinputsource-targetrayspace), transformed into the actual scaled/rotated arena. Controller aim and tether geometry were verified through a simulated XR transport, not a physical headset. Actual precision, fatigue, controller feel, and passthrough visibility require a Quest playtest.
 
 ## Pause settings and full exit
 
-The desktop and in-headset menus provide master volume, music volume, and **Casual / Arcade / Expert** difficulty. Settings persist between visits and apply during a flight. Casual slows hostile bullets, widens safe corridors, reduces firing cadence, and grants longer protection after a hit. Arcade preserves the original balance. Expert increases hostile speed/cadence and tightens corridors. Ship movement, hitbox, player weapon speed, and beam warnings remain unchanged. Difficulty changes rescale existing hostile velocities without teleporting them or repairing the player.
+The desktop and in-headset menus provide master volume, music volume, **Casual / Arcade / Expert** difficulty, **Controller aim / Thumbstick** controls, and motion reach (60–160%). Settings persist between visits and apply during a flight. Casual slows hostile bullets, widens safe corridors, reduces firing cadence, and grants longer protection after a hit. Arcade preserves the original balance. Expert increases hostile speed/cadence and tightens corridors. Ship movement, hitbox, player weapon speed, and beam warnings remain unchanged. Difficulty changes rescale existing hostile velocities without teleporting them or repairing the player.
 
 Pause suspends the AudioContext. App/tab visibility loss also stops game rendering; returning shows the paused state and does not restart audio automatically. Return to hangar closes the old audio context, and starting another flight creates a fresh one.
 
@@ -89,17 +100,20 @@ The main branch deploys through .github/workflows/deploy.yml. Pages Source is Gi
 - src/view.js: instancing, shaders, motion, anchored arena, collision markers, and in-headset HUD.
 - src/main.js: desktop/XR lifecycle, controllers, room fit, pause, fixed simulation, and accessible menus.
 - src/audio.js / src/sound-bank.js: PCM effects, adaptive music, scheduling, voice management, ducking, and mixing.
+- src/motion.js: relative pointer calibration, adaptive smoothing, precision gain, and thumbstick curve.
 - src/menu.js: validated saved settings and controller-operated pause menu.
-- tests/game.test.js / tests/menu.test.js / tests/arsenal.test.js: 32 checks covering collision, progression, power-ups, budgets, phase isolation/recovery, act deferral, and deterministic stress.
+- tests/game.test.js / tests/menu.test.js / tests/arsenal.test.js / tests/motion.test.js: 39 checks covering collision, progression, power-ups, budgets, phase isolation/recovery, act deferral, and deterministic stress.
 - tests/render-check.cjs / tests/audio-check.cjs / tests/showcase-check.cjs: optional isolated Chrome scene, busy mix, composited motion, and lifecycle verification. Use Playwright through NODE_PATH; scene/audio checks accept RIFT_BROWSER.
 
 The optional tests/lifecycle-check.cjs checks pause/audio suspension, saved settings, difficulty, hangar/reentry, hidden-page rendering, complete shutdown, blocked/allowed tab closure, simulated XR controller and session events, failure cleanup, and audio-resume races. Its fake XR transport is not a physical headset test.
+
+The optional tests/motion-render-check.cjs verifies real input handling and guide geometry through a fake XR transport: scaled/rotated placement, no initial/resume snapping, precision transitions, hand reset, tracking-loss pause, mode switching, and full disposal.
 
 ## Validation and limits
 
 Desktop captures, motion, pause/restart, combat tests, and production build were verified. The independent reviewer checked every act and set piece across three progression seeds, then tested all six boss phases for 30 seconds from three starting heights with reactive movement, without firing, bombs, or artificial invulnerability. All 18 phase probes survived. Automated probes establish routes and transitions; they do not establish human difficulty ratings.
 
-The refreshed arsenal review scored 9.0/10 provisionally. All 32 tests and the browser lifecycle/contrast checks pass. Upgraded shots remain distinct over pale and busy fixtures; sequential frames verify curved seekers and delayed Echo movement. Maximum-loadout tracking probes still expose all boss phases, with the strongest Lance taking about 13.5 seconds for Gatekeeper and 29.9 seconds for Cathedral. These use invulnerability for measurement and do not establish human difficulty.
+The preceding arsenal review scored 9.0/10 provisionally. The subsequent controller revision has no new numerical grade. All 39 current simulation/menu tests, the lifecycle suite, and simulated motion-controller checks pass. Upgraded shots remain distinct over pale and busy fixtures; sequential frames verify curved seekers and delayed Echo movement. Maximum-loadout tracking probes still expose all boss phases, with the strongest Lance taking about 13.5 seconds for Gatekeeper and 29.9 seconds for Cathedral. These use invulnerability for measurement and do not establish human difficulty.
 
 The updated 15.96-second audio audition includes Ring, Vector, and Missile effects, upgraded fire, multikills, warning/fire, bomb, collapse, and victory. It measured peak 0.613, RMS 0.070, and zero clipped samples. Subjective listening remains unverified. See QUALITY_REVIEW.md for the independent assessment.
 

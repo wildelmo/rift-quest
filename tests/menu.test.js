@@ -32,6 +32,6 @@ test('controller menu navigates, repeats predictably, adjusts, and confirms Exit
   m.input(0, -1, false, 1.25, s); assert.equal(m.selected, 2);
   m.input(0, 0, false, 1.3, s); assert.equal(m.input(-1, 0, false, 1.31, s), 'changed'); assert.equal(s.musicVolume, .95);
   m.selected = 3; m.nextMove = 0; m.input(1, 0, false, 2, s); assert.equal(s.difficulty, 'expert');
-  m.selected = 8; assert.equal(m.input(0, 0, true, 3, s), 'exit');
+  m.selected = m.rows(s).findIndex(r=>r.id==='exit'); assert.equal(m.input(0, 0, true, 3, s), 'exit');
   m.open(); assert.equal(m.selected, 0); assert.equal(m.rows(s, true)[0].label, 'Play again');
 });

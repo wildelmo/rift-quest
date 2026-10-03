@@ -20,6 +20,11 @@ export class View {
     this.geo = { sphere: new THREE.IcosahedronGeometry(1, 1), smooth: new THREE.SphereGeometry(1, 12, 8), box: new THREE.BoxGeometry(1, 1, 1), cone: new THREE.ConeGeometry(1, 1, 5), ring: new THREE.TorusGeometry(1, .035, 5, 48), oct: new THREE.OctahedronGeometry(1) };
     this.mat = {};
     this.material = (c, emissive = false, metal = false) => { const id = `${c}-${emissive}-${metal}`; return this.mat[id] ||= emissive ? new THREE.MeshBasicMaterial({ color: c }) : new THREE.MeshStandardMaterial({ color: c, metalness: metal ? .7 : .25, roughness: .38 }); };
+    this.tether=new THREE.Group();this.scene.add(this.tether);this.tether.visible=false;
+    this.tetherCone=new THREE.Mesh(new THREE.CylinderGeometry(.026,.0015,1,12,1,true),new THREE.MeshBasicMaterial({color:0x60cfff,transparent:true,opacity:.045,depthWrite:false,side:THREE.DoubleSide,toneMapped:false}));this.tetherCone.renderOrder=8;
+    this.tetherEdge=new THREE.Mesh(new THREE.CylinderGeometry(.0016,.0016,1,6),new THREE.MeshBasicMaterial({color:KEYLINE,transparent:true,opacity:.5,depthWrite:false,toneMapped:false}));this.tetherEdge.renderOrder=9;
+    this.tetherCore=new THREE.Mesh(new THREE.CylinderGeometry(.0007,.0007,1,6),new THREE.MeshBasicMaterial({color:0x86e8ff,transparent:true,opacity:.85,depthWrite:false,toneMapped:false}));this.tetherCore.renderOrder=10;
+    this.tether.add(this.tetherCone,this.tetherEdge,this.tetherCore);
     this.ship = this.makeShip(); this.ship.scale.setScalar(.8); this.root.add(this.ship);
     this.echo = this.makeShip(); this.echo.scale.setScalar(.45); this.root.add(this.echo);
     this.shield = new THREE.Mesh(this.geo.ring, this.material(MINT, true)); this.shield.scale.setScalar(.36); this.root.add(this.shield);
@@ -62,7 +67,7 @@ export class View {
     for (const x of [-8,8]) for (const y of [-4.5,4.5]) { this.corners.add(this.mesh('box', 0x779387, true, [x - Math.sign(x)*.15,y,0], [.3,.015,.015])); this.corners.add(this.mesh('box', 0x779387, true,[x,y-Math.sign(y)*.15,0],[.015,.3,.015])); }
     this.hud = this.textPanel(1536, 180, 15, 1.76); this.hud.position.set(0, 5.1, 0); this.root.add(this.hud);
     this.message = this.textPanel(1536, 560, 11.5, 4.2); this.message.position.set(0, .4, .4); this.root.add(this.message);
-    this.pausePanel=this.textPanel(1536,1000,9,5.86);this.pausePanel.position.set(0,.2,.45);this.pausePanel.visible=false;this.root.add(this.pausePanel);
+    this.pausePanel=this.textPanel(1536,1140,9,6.68);this.pausePanel.position.set(0,.2,.45);this.pausePanel.visible=false;this.root.add(this.pausePanel);
     this.bossBar = this.textPanel(1024, 110, 7, .75); this.bossBar.position.set(1.5, -4.85, 0); this.root.add(this.bossBar);
     this.previewScene = new THREE.Scene();this.previewScene.environment=this.environment; this.previewScene.add(new THREE.HemisphereLight(0xe0eeff,0x101a30,.7));
     const previewLight = new THREE.DirectionalLight(0xffe0c3,3); previewLight.position.set(-2,4,5); this.previewScene.add(previewLight);
@@ -115,14 +120,14 @@ export class View {
     if(this.pausePanel.visible&&menu)this.paintPanel(this.pausePanel,JSON.stringify(menu)+settings.difficulty,(c,w,h)=>{
       c.fillStyle='#102019f2';c.fillRect(0,0,w,h);c.strokeStyle='#729b85';c.lineWidth=3;c.strokeRect(2,2,w-4,h-4);
       c.textAlign='left';c.fillStyle='#ff9468';c.font='bold 54px monospace';c.fillText('RIFT / FLIGHT SYSTEMS',64,85);
-      c.fillStyle='#a9c4b6';c.font='28px monospace';c.fillText('PAUSED · '+settings.difficulty.toUpperCase()+' · YOUR ROOM IS THE WORLD',64,137);
+      c.fillStyle='#a9c4b6';c.font='28px monospace';c.fillText('PAUSED · '+settings.difficulty.toUpperCase()+' · '+(settings.controls==='motion'?'CONTROLLER AIM':'THUMBSTICK'),64,137);
       for(let i=0;i<menu.rows.length;i++){
         const row=menu.rows[i],y=178+i*74,selected=i===menu.selected;
         if(selected){c.fillStyle='#b4ffe2';c.fillRect(40,y,w-80,66);}
         c.fillStyle=selected?'#102019':row.id==='exit'?'#ffa17c':'#e1f5e9';c.font='bold 38px monospace';c.fillText((selected?'› ':'  ')+row.label,64,y+46);
         c.textAlign='right';c.font='36px monospace';c.fillText(row.value,w-72,y+46);c.textAlign='left';
       }
-      c.fillStyle='#a9c4b6';c.font='26px monospace';c.fillText('LEFT STICK ↑↓ SELECT / ←→ ADJUST',64,904);c.fillText('RIGHT TRIGGER CONFIRM · B RESUME · X RECENTER',64,952);
+      c.fillStyle='#a9c4b6';c.font='26px monospace';c.fillText('LEFT STICK ↑↓ SELECT / ←→ ADJUST',64,1030);c.fillText('RIGHT TRIGGER CONFIRM · B RESUME · X RECENTER',64,1078);c.font='22px monospace';c.fillText('AIM: POINT RIGHT HAND · HOLD RIGHT STICK TO RESET HAND POSITION',64,1120);
     });
     const p=game.player;this.message.position.y=paused||game.state!=='playing'?.4:4.05;this.message.scale.setScalar(paused||game.state!=='playing'?1:.60); this.hud.visible=xr; this.message.visible=xr && !paused && ( game.state==='lost' || (game.state==='won'&&!this.cinematics.some(c=>c.kind==='death')) || (game.state==='playing'&&!!message)); this.corners.visible=!xr || paused;
     if (xr) this.paintPanel(this.hud,`${p.hp}/${p.shield}/${p.weapon}/${p.level}/${p.echo}/${p.vector}/${p.missiles}/${game.bombs}/${game.score}/${Math.floor(p.charge*10)}`,c=>{
@@ -151,7 +156,7 @@ export class View {
     if(e.type==='pickup'){this.flash(e.x,e.y,colors[e.kind],1.5,.35);this.spark(e.x,e.y,colors[e.kind],22,.7);}
     if(e.type==='charge'){this.flash(e.x+.4,e.y,0xaceeff,2,.2);for(let i=0;i<5;i++){const obj=this.mesh('ring',0x78c5ff,true,[e.x+.6+i*.6,e.y,.12]);obj.rotation.y=Math.PI/2;this.root.add(obj);this.shockwaves.push({obj,age:-i*.035,life:.36,size:.7});}}
     if(e.type==='shoot'){this.flash(e.x+.4,e.y,e.weapon==='SPREAD'?0xb4ff68:e.weapon==='LANCE'?0x919bff:0x7de8ff,.5,.065);this.spark(e.x+.4,e.y,0xaceeff,2,.22);}if(e.type==='impact'){this.flash(e.x,e.y,0xffc878,.45,.08);this.spark(e.x,e.y,0xffb056,7,.6);}if(e.type==='graze')this.spark(e.x,e.y,0x91caff,3,.3);}
-  clear() {for(const e of this.cinematics)this.removeObject(e.obj);this.cinematics=[];this.recoil=0;this.sceneTime=0; for(const map of [this.objects,this.pickupObjects,this.effectObjects]){for(const obj of map.values())this.removeObject(obj);map.clear();}for(const e of [...this.flashes,...this.shockwaves])this.removeObject(e.obj);this.flashes=[];this.shockwaves=[];this.particles=[];this.fragments=[]; }
+  clear() {this.tether.visible=false;for(const e of this.cinematics)this.removeObject(e.obj);this.cinematics=[];this.recoil=0;this.sceneTime=0; for(const map of [this.objects,this.pickupObjects,this.effectObjects]){for(const obj of map.values())this.removeObject(obj);map.clear();}for(const e of [...this.flashes,...this.shockwaves])this.removeObject(e.obj);this.flashes=[];this.shockwaves=[];this.particles=[];this.fragments=[]; }
   removeObject(obj){obj.traverse(m=>{if(m.isMesh&&m.material?.isShaderMaterial){m.geometry!==this.art.plane&&m.geometry.dispose();m.material.dispose();}});this.root.remove(obj);if(obj.userData.boundary){this.root.remove(obj.userData.boundary);obj.userData.boundary.geometry.dispose();obj.userData.boundary.material.dispose();}if(obj.userData.warning){obj.userData.warning.traverse(m=>{if(m.isMesh)m.material.dispose();});this.root.remove(obj.userData.warning);}if(obj.userData.laser)this.root.remove(obj.userData.laser);if(obj.userData.label){obj.userData.label.geometry.dispose();obj.userData.label.material.map.dispose();obj.userData.label.material.dispose();}}
   sync(map,items,create,update){const ids=new Set();for(const e of items){ids.add(e.id);let obj=map.get(e.id);if(!obj){obj=create(e);map.set(e.id,obj);}update(obj,e);}for(const [id,obj]of map)if(!ids.has(id)){this.removeObject(obj);map.delete(id);}}
   update(game,dt,time){
@@ -227,6 +232,24 @@ export class View {
     });const mesh=new THREE.Mesh(this.art.plane,material);mesh.renderOrder=26;return mesh;
   }
   animateEngines(ship,time,power=1){for(const side of [-1,1]){const jet=ship.getObjectByName(`jet${side}`),engine=ship.getObjectByName(`engine${side}`);if(jet)jet.scale.x=(.65+Math.sin(time*53+side)*.08)*power;if(engine)engine.scale.y=(.23+Math.sin(time*47)*.04)*power;}}
+  controllerSample(frame,source){
+    if(!frame?.getPose||!source?.targetRaySpace||source.targetRayMode!=='tracked-pointer')return null;
+    const pose=frame.getPose(source.targetRaySpace,this.renderer.xr.getReferenceSpace());
+    if(!pose||pose.emulatedPosition)return null;
+    const p=pose.transform.position,q=pose.transform.orientation,origin=new THREE.Vector3(p.x,p.y,p.z);
+    if(![p.x,p.y,p.z,q.x,q.y,q.z,q.w].every(Number.isFinite))return null;
+    const direction=new THREE.Vector3(0,0,-1).applyQuaternion(new THREE.Quaternion(q.x,q.y,q.z,q.w));
+    this.root.updateMatrixWorld(true);const inverse=this.root.matrixWorld.clone().invert(),localOrigin=origin.clone().applyMatrix4(inverse),localDirection=direction.clone().transformDirection(inverse);
+    if(localDirection.z>=-.12)return {tracked:true,origin,point:null};
+    const t=-localOrigin.z/localDirection.z;if(t<=0||t*this.root.scale.x>6)return {tracked:true,origin,point:null};
+    const point=localOrigin.addScaledVector(localDirection,t);return {tracked:true,origin,point:{x:point.x,y:point.y}};
+  }
+  updateTether(cue,player,active){
+    this.tether.visible=!!(active&&cue?.valid);if(!this.tether.visible)return;
+    this.root.updateMatrixWorld(true);const end=this.root.localToWorld(new THREE.Vector3(player.x,player.y,0)),start=cue.origin.clone(),direction=end.clone().sub(start),length=direction.length();
+    if(length<.05){this.tether.visible=false;return;}
+    this.tether.position.copy(start).add(end).multiplyScalar(.5);this.tether.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),direction.normalize());this.tether.scale.set(1,length,1);this.tetherCore.material.color.setHex(cue.clutch?0xe6fff6:0x86e8ff);
+  }
   resize(){if(this.renderer.xr.isPresenting)return;this.renderer.setSize(innerWidth,innerHeight);this.camera.aspect=innerWidth/innerHeight;this.camera.position.set(0,0,Math.max(13.8,9.2/this.camera.aspect/Math.tan(21*Math.PI/180)));this.camera.updateProjectionMatrix();}
   place(pose,settings){const q=new THREE.Quaternion().fromArray(pose.transform.orientation? [pose.transform.orientation.x,pose.transform.orientation.y,pose.transform.orientation.z,pose.transform.orientation.w]:[0,0,0,1]);const forward=new THREE.Vector3(0,0,-1).applyQuaternion(q);forward.y=0;forward.normalize();const pos=pose.transform.position;this.root.scale.setScalar(settings.width/16);this.root.position.set(pos.x+forward.x*settings.distance,Math.max(settings.width*9/32+.15,pos.y-.12),pos.z+forward.z*settings.distance);this.root.rotation.set(0,Math.atan2(-forward.x,-forward.z),0);}
   desktop(){this.root.scale.setScalar(1);this.root.position.set(0,0,0);this.root.rotation.set(0,0,0);this.resize();}

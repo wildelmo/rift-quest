@@ -1,10 +1,12 @@
 import './style.css';
+import { MotionPilot, stickAxis } from './motion.js';
 import { Game } from './game.js';
 import { View } from './view.js';
 import { Sound } from './audio.js';
 import { PauseMenu, normalizeSettings, DIFFICULTIES } from './menu.js';
 
 const $ = id => document.getElementById(id);
+const motionPilot=new MotionPilot();let motionCue=null;
 const game = new Game(), sound = new Sound(), menu = new PauseMenu();
 let view;
 try { view = new View($('viewport')); }
@@ -17,6 +19,7 @@ let exiting = false, exitPromise = null, loopRunning = false, frameCount = 0;
 let pendingResult = null, message = null, messageUntil = 0, lastTime = 0, uiClock = 0, endTime = 0, fixedAccumulator = 0;
 const keys = new Set(), previousButtons = new Map();
 function applySettings(roomFit = false) {
+  motionPilot.reset();motionCue=null;
   sound.setVolume(settings.volume, settings.musicVolume);
   game.setDifficulty(settings.difficulty);
   for (const prefix of ['', 'pause-']) {
@@ -24,6 +27,7 @@ function applySettings(roomFit = false) {
       $(prefix + id).value = settings[key]; $(prefix + id + '-value').value = `${Math.round(settings[key] * 100)}%`;
     }
     $(prefix + 'difficulty').value = settings.difficulty;
+    $(prefix+'controls').value=settings.controls;$(prefix+'motion-reach').value=settings.motionReach;$(prefix+'motion-reach-value').value=`${Math.round(settings.motionReach*100)}%`;
   }
   for (const [id, key, output] of [['distance', 'distance', 'distance-value'], ['arena-width', 'width', 'width-value']]) {
     $(id).value = settings[key]; $(output).value = `${(settings[key] * 3.28084).toFixed(1)} ft`;
@@ -35,7 +39,7 @@ function applySettings(roomFit = false) {
 applySettings();
 function startLoop() { if (exiting || document.hidden || loopRunning) return; lastTime = 0; loopRunning = true; if(view.renderer.xr.isPresenting)view.renderer.xr.setAnimationLoop(animate);else view.renderer.setAnimationLoop(animate); }
 function stopLoop() { loopRunning = false; lastTime = 0; view.renderer.setAnimationLoop(null); }
-function resetGame() { pendingResult = null; sound.reset(); game.reset(); view.clear(); message = null; fixedAccumulator = 0; keys.clear(); }
+function resetGame() { motionPilot.reset();motionCue=null;pendingResult = null; sound.reset(); game.reset(); view.clear(); message = null; fixedAccumulator = 0; keys.clear(); }
 function startDesktop() {
   if (exiting || xrSession) return;
   document.activeElement?.blur(); resetGame(); playing = true; paused = false; document.body.classList.add('playing');
@@ -44,7 +48,7 @@ function startDesktop() {
 }
 function setPaused(value) {
   if (exiting || !playing) return;
-  paused = value; keys.clear(); fixedAccumulator = 0;
+  paused = value; motionPilot.reset();motionCue=null;keys.clear(); fixedAccumulator = 0;
   if (paused) { menu.open(); sound.suspend(); }
   else if (!document.hidden) { document.activeElement?.blur(); sound.start().catch(() => {}); }
   if (!xrSession) {
@@ -98,8 +102,8 @@ $('hangar').addEventListener('click', returnHome);
 $('exit').addEventListener('click', () => exitGame());
 $('audio').addEventListener('change', e => { sound.enabled = e.target.checked; sound.setVolume(settings.volume, settings.musicVolume); });
 for (const prefix of ['', 'pause-']) {
-  for (const [id, key] of [['volume', 'volume'], ['music-volume', 'musicVolume'], ['difficulty', 'difficulty']]) {
-    $(prefix + id).addEventListener(id === 'difficulty' ? 'change' : 'input', e => { settings[key] = key === 'difficulty' ? e.target.value : Number(e.target.value); applySettings(); });
+  for (const [id, key] of [['volume', 'volume'], ['music-volume', 'musicVolume'], ['difficulty', 'difficulty'], ['controls','controls'], ['motion-reach','motionReach']]) {
+    $(prefix + id).addEventListener(['difficulty','controls'].includes(id) ? 'change' : 'input', e => { settings[key] = ['difficulty','controls'].includes(key) ? e.target.value : Number(e.target.value); applySettings(); });
   }
 }
 for (const [id, key] of [['distance', 'distance'], ['arena-width', 'width']]) $(id).addEventListener('input', e => { settings[key] = Number(e.target.value); applySettings(true); });
@@ -158,18 +162,19 @@ $('enter-xr').addEventListener('click', async () => {
   }
 });
 function rising(key, down) { const before = previousButtons.get(key); previousButtons.set(key, down); return down && !before; }
-function readInput(dt, now) {
+function readInput(dt, now, frame) {
+  motionCue=null;
   if (!xrSession) return { x: (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0), y: (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0), fire: keys.has('Space'), charge: keys.has('ShiftLeft') || keys.has('ShiftRight'), focus: keys.has('ControlLeft') || keys.has('ControlRight'), bomb: false };
-  let left = null, right = null;
-  for (const source of xrSession.inputSources) { if (source.handedness === 'left') left = source.gamepad; if (source.handedness === 'right') right = source.gamepad; }
+  let left = null, right = null, rightSource=null;
+  for (const source of xrSession.inputSources) { if (source.handedness === 'left') left = source.gamepad; if (source.handedness === 'right') {right = source.gamepad;rightSource=source;} }
   const b = (pad, i) => !!pad?.buttons[i]?.pressed;
-  const axis = (pad, i) => { const v = pad?.axes[i] || 0; return Math.abs(v) < .15 ? 0 : Math.sign(v) * (Math.abs(v) - .15) / .85; };
+  const axis = (pad, i) => { const v = pad?.axes[i] || 0; return stickAxis(v); };
   const input = { x: axis(left, 2), y: -axis(left, 3), fire: b(right, 0), charge: b(right, 1), focus: b(left, 1), bomb: b(right, 4) };
   const trigger = rising('trigger', input.fire), pause = rising('pause', b(right, 5)), recenter = rising('recenter', b(left, 4));
   if (pause) { if(paused)resumeGame();else setPaused(true); }
   if (recenter) { setPaused(true); needsPlacement = true; }
   if (paused) {
-    const action = menu.input(input.x, input.y, trigger, now, settings);
+    const action = menu.input(left?.axes[2]||0, -(left?.axes[3]||0), trigger, now, settings);
     if (action === 'changed') applySettings(['width','distance'].includes(menu.rows(settings)[menu.selected].id));
     if (action === 'resume') resumeGame();
     if (action === 'restart') restartGame();
@@ -182,6 +187,13 @@ function readInput(dt, now) {
     return {};
   }
   if (!left || !right) { setPaused(true); return {}; }
+  if(settings.controls==='motion'){
+    const sample=view.controllerSample(frame,rightSource);
+    if(!sample?.tracked){setPaused(true);message={title:'CONTROLLER TRACKING LOST',subtitle:'Return the right controller to view, then resume.'};messageUntil=now+3;return {};}
+    if(!sample.point){motionPilot.reset();motionCue={origin:sample.origin,valid:false};return {...input,x:0,y:0};}
+    const target=motionPilot.update(sample.point,game.player,dt,{focus:input.focus||input.charge,clutch:b(right,3),reach:settings.motionReach});
+    motionCue={origin:sample.origin,valid:true,clutch:b(right,3)};input.target=target;input.x=input.y=0;
+  }
   return input;
 }
 function haptic(strength,duration){if(!xrSession)return;for(const s of xrSession.inputSources){if(s.handedness==='right')s.gamepad?.hapticActuators?.[0]?.pulse(strength,duration)?.catch(()=>{});}}
@@ -206,12 +218,12 @@ function animate(ms,frame){
   const now=ms/1000,dt=Math.min(.05,lastTime?now-lastTime:0);lastTime=now;
   if(playing){
     if(xrSession&&frame){const pose=frame.getViewerPose(view.renderer.xr.getReferenceSpace());if(pose){lastPose=pose;if(needsPlacement){view.place(pose,settings);needsPlacement=false;}}else if(!paused)setPaused(true);}
-    const input=readInput(dt,now);
+    const input=readInput(dt,now,frame);
     if(exiting)return;
     if(!paused&&game.state==='playing'){fixedAccumulator+=dt;while(fixedAccumulator>=1/90){game.update(1/90,input);fixedAccumulator-=1/90;}}else fixedAccumulator=0;
     handleEvents(now);
     if(pendingResult&&now>=pendingResult.at&&(!pendingResult.won||!view.cinematics.some(c=>c.kind==='death')))showResult();
-    sound.update(!paused&&game.state==='playing',game.boss?.phase||0,game.player.charge,game.act);view.update(game,paused?0:dt,now);
+    sound.update(!paused&&game.state==='playing',game.boss?.phase||0,game.player.charge,game.act);view.update(game,paused?0:dt,now);view.updateTether(motionCue,game.player,!!xrSession&&!paused&&game.state==='playing');
     if(now-messageUntil>0)message=null;
     view.hudUpdate(game,!!xrSession,paused,message,settings,{rows:menu.rows(settings,game.state!=='playing',needsPlacement),selected:menu.selected});
     uiClock+=dt;if(uiClock>.1){updateDOM(now);uiClock=0;}
@@ -220,4 +232,4 @@ function animate(ms,frame){
 }
 startLoop();
 // Development-only observability for isolated lifecycle verification.
-if(import.meta.env.DEV)window.__rift={game,view,sound,settings,menu,startDesktop,setPaused,returnHome,exitGame,readInput,get paused(){return paused;},get playing(){return playing;},get loopRunning(){return loopRunning;},get frameCount(){return frameCount;},get exiting(){return exiting;}};
+if(import.meta.env.DEV)window.__rift={game,view,sound,settings,menu,startDesktop,setPaused,returnHome,exitGame,readInput,motionPilot,get motionCue(){return motionCue;},get paused(){return paused;},get playing(){return playing;},get loopRunning(){return loopRunning;},get frameCount(){return frameCount;},get exiting(){return exiting;}};

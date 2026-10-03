@@ -60,3 +60,11 @@ The reviewer independently checked source, eight pickup icons, pale and busy bac
 No physical Quest playtest, measured headset frame rate, real passthrough lighting assessment, subjective audio review, or complete human playthrough was performed. The 9.0 score assesses this web upgrade; it does not certify a finished commercial Quest release.
 
 Reproducible local checks: npm test, npm run build, tests/arsenal-render-check.cjs, tests/contrast-check.cjs, tests/lifecycle-check.cjs, tests/render-check.cjs, and tests/audio-check.cjs. Browser checks use an isolated Playwright/Chrome session; QA background fixtures and development controls are not shipped gameplay.
+
+## Subsequent controller precision update
+
+The arsenal score above does not grade this later control revision. Controller aim is now the default for Quest, with a visible controller-to-ship tether and faint light cone. Relative calibration preserves the current ship position on deployment, pause/resume, focus changes, and hand repositioning. Adaptive filtering reduces tremor while allowing faster sweeps; left grip reduces gain to 35%; holding the right thumbstick button resets hand position. Saved controls and motion reach are available in both menus. Thumbstick mode remains available with a finer central response curve.
+
+All 39 current simulation/menu tests and the 10-case lifecycle suite pass. The new simulated XR browser check exercises the actual controller input path against a translated, scaled, rotated flight plane. It verifies exact pointer projection and tether endpoint, trigger fire, no snapping when focusing/resetting/resuming, pause and guide removal on missing/emulated tracking, mode switching, and complete disposal. The production build passes. Player/hostile relative swept collisions also prevent fast motion from skipping a bullet, body, or active beam. Decorative guide geometry never participates in combat.
+
+This is a first motion-control pass, without a fresh independent score. No physical controller comfort, accuracy, fatigue, actual passthrough visibility, or sustained Quest performance is claimed. The user's headset feedback must determine whether the control feel is acceptable.
