@@ -261,7 +261,13 @@ export class Sfx {
       const out = ctx.createGain();
       out.connect(ctx.destination);
       fn(ctx, out);
-      this.buffers[name] = await ctx.startRendering();
+      const buf = await ctx.startRendering();
+      // normalise anything that clips so layered explosions stay clean
+      const d = buf.getChannelData(0);
+      let peak = 0;
+      for (let i = 0; i < d.length; i++) peak = Math.max(peak, Math.abs(d[i]));
+      if (peak > 0.95) for (let i = 0; i < d.length; i++) d[i] *= 0.95 / peak;
+      this.buffers[name] = buf;
     }));
   }
 

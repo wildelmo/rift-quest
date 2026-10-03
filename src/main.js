@@ -136,8 +136,16 @@ async function startXR(kind) {
     ui.status.textContent = `Could not start ${sessionMode}: ${e.message}`;
     return;
   }
-  if (kind === 'vr') ensureFakeRoom();
-  else if (fakeRoom) fakeRoom.group.visible = false;
+  if (kind === 'vr') {
+    ensureFakeRoom();
+    fakeRoom.group.visible = true;
+    room.setPlanes(fakeRoom.planes);
+  } else {
+    // real room: forget the stand-in walls until plane detection reports the real ones
+    if (fakeRoom) fakeRoom.group.visible = false;
+    room.setPlanes([]);
+    planeStamp = '';
+  }
   input = xrInput;
   mode = kind;
   xrPlaced = false;
@@ -152,6 +160,13 @@ async function startXR(kind) {
     input = desktopInput;
     ui.overlay.classList.remove('hidden');
     game.heldHand = null;
+    room.placeFromHead(nominalHead.position, nominalHead.quaternion);
+    if (fakeRoom) {
+      fakeRoom.group.visible = true;
+      room.setPlanes(fakeRoom.planes);
+      room.layoutRifts();
+    }
+    game.hud.retilt();
     game.toTitle();
   });
 }
