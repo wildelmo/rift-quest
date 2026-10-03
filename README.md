@@ -12,9 +12,15 @@ A passthrough mixed-reality side-scrolling shooter for Meta Quest 3, built with 
 4. In the pause menu, move the left stick up/down to select a row and left/right to adjust it. Set arena width and plane distance (5–8 feet). **X** recenters the arena.
 5. Look straight ahead where you want the arena, select **Deploy ship**, and pull the right trigger. Deployment centers the plane in your current facing direction, upright at eye height. The arena stays fixed as you move your head.
 
-The scene has no skybox, opaque background, or background art. The immersive AR session and zero-alpha WebGL clear leave the room visible. Combat simulation is strictly 2D; incoming enemies only become collidable after arriving on the plane. Explosions, debris, hulls, and machinery provide decorative depth. Amber rings mark exact enemy and boss collision boundaries.
+The scene has no skybox, opaque background, or background art. The immersive AR session and zero-alpha WebGL clear leave the room visible. Combat simulation is strictly 2D; incoming enemies only become collidable after arriving on the plane. Explosions, debris, hulls, and machinery provide decorative depth. Small amber brackets mark the central enemy and boss collision boundaries. Boss weapon pods and reactors are separate targets on the same plane.
 
 Room fit is manual: this version does not scan walls, request room meshes, or occlude objects behind furniture. Default width is 3.8 m with a 16:9 arena. The ship is approximately 8 cm long at default scale. Placement lasts for the current session. The game requests a native WebXR room anchor to preserve physical placement as tracking coordinates change. If anchors are unavailable, it compensates reference-space resets with a known transform; an unknown reset pauses play and asks for X to recenter. Lost anchor tracking pauses play and audio; recovery still requires Resume. Recenter replaces the anchor without restarting the level, and Exit deletes anchors including requests that finish late. No persistent room data is stored. No APK installation is required.
+
+## Ships and destructible bosses
+
+The fleet uses angular alloy hulls, raised armor, etched panel textures, recessed vents, and distinct silhouettes. Hits briefly illuminate the struck ship while preserving dark machinery recesses. Surface impacts produce textured fireballs and sparks; destroyed components tumble into the room as decorative debris.
+
+Gatekeeper has two destructible weapon pods; Cathedral has two weapon pods and two outer reactors. Shooting these modules damages the boss, and breaking them awards a structural damage bonus and score. Destroyed weapon pods weaken selected attacks. Animated energy cells identify intact targets, damaged cells sputter, and broken modules leave exposed sockets. The central core remains vulnerable throughout, so parts are an optional tactical route. The weapon and movement rules remain two-dimensional.
 
 ## Controls
 

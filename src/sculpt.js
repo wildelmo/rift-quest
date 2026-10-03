@@ -1,19 +1,82 @@
 import * as THREE from 'three';
 import { Art as BaseArt } from './art.js';
-const C={white:0xc9d7df,edge:0x849cae,ink:0x101c2b,steel:0x354b63,copper:0x9e5439,gold:0xc99050,cyan:0x50dcff,hot:0xff7642};
-// Smooth compound surfaces and a restrained ceramic/graphite/copper material language.
+import { BOSS_PART_LAYOUTS } from './boss-parts.js';
+const C={white:0xbacbd0,edge:0x8eabb4,ink:0x111e28,steel:0x40596b,copper:0x885648,gold:0xbd9870,cyan:0x70e9ee,hot:0xff7149};
+// Angular armored machines: etched alloy, recessed machinery, restrained energy channels.
 export class Art extends BaseArt {
-  finishMaterial(color){
-    const key='finish-'+color;if(this.materials.has(key))return this.materials.get(key);
-    const canvas=document.createElement('canvas');canvas.width=512;canvas.height=256;const c=canvas.getContext('2d');c.fillStyle='#9a9a9a';c.fillRect(0,0,512,256);
-    c.strokeStyle='#656565';c.lineWidth=1;for(const x of [70,188,320,434]){c.beginPath();c.moveTo(x,0);c.lineTo(x,256);c.stroke();for(const y of [18,122,240]){c.fillStyle='#434343';c.fillRect(x+5,y,3,3);}}
-    c.fillStyle='#b0b0b0';for(let i=0;i<40;i++)c.fillRect(230+i*2,48,1,9);
-    const roughness=new THREE.CanvasTexture(canvas);roughness.wrapS=roughness.wrapT=THREE.RepeatWrapping;
-    const m=this.mat(color).clone();m.roughness=Math.max(m.roughness,.35);m.roughnessMap=roughness;m.bumpMap=roughness;m.bumpScale=.002;this.materials.set(key,m);return m;
+  constructor(){
+    super();
+    this.box=new THREE.BoxGeometry(1,1,1);
+    // One shared deterministic surface atlas: etched panel joins, rivets and machining grain.
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=512;
+    const c=canvas.getContext('2d');c.fillStyle='#c3c7c8';c.fillRect(0,0,512,512);
+    let seed=7183;const rand=()=>((seed=(seed*1664525+1013904223)>>>0)/4294967296);
+    for(let i=0;i<18000;i++){const v=130+Math.floor(rand()*80);c.fillStyle='rgba('+v+','+v+','+v+',.2)';c.fillRect(rand()*512,rand()*512,1+rand()*5,.7);}
+    for(let y=0;y<512;y+=128)for(let x=0;x<512;x+=128){
+      c.strokeStyle='#485963';c.lineWidth=3;c.strokeRect(x+4,y+4,120,120);
+      c.strokeStyle='#e4e6e2';c.lineWidth=1;c.strokeRect(x+8,y+8,112,112);
+      for(const [dx,dy]of [[15,15],[113,15],[15,113],[113,113]]){c.fillStyle='#344752';c.fillRect(x+dx,y+dy,3,3);}
+      c.fillStyle='#65727a';for(let j=0;j<7;j++)c.fillRect(x+72+j*5,y+80,2,25);
+      c.fillStyle='#d9ddd9';c.fillRect(x+19,y+31,32,3);c.fillRect(x+19,y+38,19,2);
+      c.strokeStyle='#829299';c.beginPath();c.moveTo(x+19,y+91);c.lineTo(x+42,y+67);c.lineTo(x+63,y+67);c.stroke();
+    }
+    this.armorTexture=new THREE.CanvasTexture(canvas);this.armorTexture.wrapS=this.armorTexture.wrapT=THREE.RepeatWrapping;this.armorTexture.colorSpace=THREE.SRGBColorSpace;
+    this.armorTexture.anisotropy=4;
   }
+  finishMaterial(color){return this.mat(color);}
   mat(color,glow=false,glass=false){
-    const key=`${color}/${glow}/${glass}`;
-    if(!this.materials.has(key))this.materials.set(key,glow?new THREE.MeshBasicMaterial({color,toneMapped:false}):new THREE.MeshPhysicalMaterial({color,metalness:glass?.7:.48,roughness:glass?.1:color===C.ink?.48:.29,clearcoat:color===C.ink?.25:1,clearcoatRoughness:.18,envMapIntensity:color===C.ink?.32:.65}));return this.materials.get(key);
+    const key='alloy-'+color+'/'+glow+'/'+glass;
+    if(!this.materials.has(key))this.materials.set(key,glow?new THREE.MeshBasicMaterial({color,toneMapped:false}):new THREE.MeshStandardMaterial({color,metalness:glass?.64:.58,roughness:glass?.24:.66,map:glass?null:this.armorTexture,bumpMap:glass?null:this.armorTexture,bumpScale:.005,envMapIntensity:.52}));
+    return this.materials.get(key);
+  }
+  contour(group){
+    super.contour(group);
+    for(const [i,hull]of group.children.filter(m=>m.name==='contrast-contour').entries()){
+      const key='alloy-contour-'+i;let material=this.materials.get(key);
+      if(!material){const width=i?.0025:.013;material=new THREE.MeshBasicMaterial({color:i?0xc5d0c9:0x111827,side:THREE.BackSide,toneMapped:false});material.onBeforeCompile=shader=>{shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','vec3 transformed = position + normalize(normal) * '+width.toFixed(4)+';');};material.customProgramCacheKey=()=>key;this.materials.set(key,material);}
+      hull.material=material;
+    }
+  }
+  armor(g,points,color,depth=.08,z=0){
+    const m=this.plate(g,points,color,depth,z);m.name='armor';return m;
+  }
+  facet(g,points,color,depth=.08,z=0){
+    this.armor(g,points,color,depth,z);
+    const cx=points.reduce((n,p)=>n+p[0],0)/points.length,cy=points.reduce((n,p)=>n+p[1],0)/points.length;
+    const area=points.reduce((n,p,i)=>n+p[0]*points[(i+1)%points.length][1]-points[(i+1)%points.length][0]*p[1],0);
+    const pos=[],uv=[];for(let i=0;i<points.length;i++){const a=points[area<0?(i+1)%points.length:i],b=points[area<0?i:(i+1)%points.length];for(const [x,y,zz] of [[a[0],a[1],z+depth*.51],[b[0],b[1],z+depth*.51],[cx,cy,z+depth*1.35]]){pos.push(x,y,zz);uv.push(x,y);}}
+    const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));geometry.computeVertexNormals();return this.part(g,geometry,color);
+  }
+  rail(g,points,color,width=.012,z=.12,glow=false){
+    for(let i=1;i<points.length;i++){const a=points[i-1],b=points[i],dx=b[0]-a[0],dy=b[1]-a[1];this.part(g,this.box,color,[(a[0]+b[0])/2,(a[1]+b[1])/2,z],[Math.hypot(dx,dy),width,width],[0,0,Math.atan2(dy,dx)],glow);}
+  }
+  vents(g,x,y,count=5,size=.06,z=.14,rotation=0){
+    const h=new THREE.Group();h.position.set(x,y,z);h.rotation.z=rotation;
+    this.part(h,this.box,C.ink,[0,0,0],[count*.032+.025,size+.025,.025]);
+    for(let i=0;i<count;i++)this.part(h,this.box,C.edge,[(i-(count-1)/2)*.032,0,.017],[.012,size,.012],[0,.15,0]);
+    this.merge(h);for(const m of [...h.children]){m.applyMatrix4(h.matrix.makeRotationZ(rotation));m.position.add(new THREE.Vector3(x,y,z));g.add(m);}
+  }
+  socket(g,x,y,r,id){
+    const node=new THREE.Group();node.name='weakpoint-'+id;node.position.set(x,y,.18);
+    const body=new THREE.Group();body.name='module-armor';node.add(body);
+    const points=[[-.78,-.65],[.35,-.83],[.85,-.35],[.85,.35],[.35,.83],[-.78,.65],[-1,0]].map(([a,b])=>[a*r,b*r]);
+    this.armor(body,points,C.ink,r*.55,0);
+    for(const side of [-1,1]){
+      this.armor(body,[[-r*.82,side*r*.29],[-r*.6,side*r*.65],[r*.43,side*r*.65],[r*.76,side*r*.30]],C.edge,r*.18,r*.3);
+      this.rail(body,[[-r*.6,side*r*.5],[r*.36,side*r*.5]],C.hot,r*.06,r*.43,true);
+    }
+    for(let j=0;j<3;j++)this.part(body,this.box,C.gold,[r*.54,-r*.3+j*r*.3,r*.36],[r*.15,r*.10,r*.15]);
+    this.part(body,this.box,C.ink,[-r*.13,0,r*.43],[r*1.08,r*.43,r*.045]);
+    // Recessed energy cell behind a dark slotted mechanical grille, never a flat lamp panel.
+    for(let i=0;i<4;i++)this.part(body,this.box,C.steel,[-r*.5+i*r*.25,0,r*.55],[r*.08,r*.43,r*.10],[0,.2,0]);
+    for(const side of [-1,1])this.part(body,this.box,C.ink,[-r*.13,side*r*.18,r*.53],[r*1.05,r*.075,r*.065]);
+    this.part(body,this.box,0xffeee0,[-r*.12,-r*.12,r*.57],[r*.66,r*.036,r*.025],[0,0,0],true);
+    this.merge(body);
+    const core=this.part(node,this.box,0xff9a50,[-r*.13,0,r*.49],[r*.93,r*.30,r*.06],[0,0,0],true);core.name='weak-core';
+    const wreck=new THREE.Group();wreck.name='socket-'+id;wreck.position.set(x,y,.12);wreck.visible=false;
+    this.armor(wreck,points,C.ink,r*.30,0);
+    for(let i=0;i<4;i++){this.part(wreck,this.box,C.steel,[(i-1.5)*r*.3,0,r*.12],[r*.13,r*.85,r*.15],[0,0,.18]);this.part(wreck,this.box,0xe45631,[(i-1.5)*r*.3,r*(i%2?.17:-.17),r*.21],[r*.065,r*.20,r*.025],[0,0,.18],true);}
+    this.merge(wreck);g.add(wreck,node);return node;
   }
   tube(g,points,r,color,glow=false){return this.part(g,new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(...p))),Math.min(192,Math.max(24,points.length*2)),r,8,false),color,[0,0,0],[1,1,1],[0,0,0],glow);}
   shell(g,sections,color,pos=[0,0,0],scale=[1,1,1],rot=[0,0,0],glow=false,glass=false){
@@ -25,87 +88,175 @@ export class Art extends BaseArt {
   ship(){
     if(this.models.has('sculpt-ship'))return this.models.get('sculpt-ship').clone(true);
     const g=new THREE.Group(),h=new THREE.Group();g.add(h);
-    this.shell(h,[[-.53,.002,.002],[-.38,.14,.1],[-.1,.12,.1],[.22,.085,.06],[.65,.002,.002]],C.ink,[0,0,-.01]);
-    this.shell(h,[[-.4,.003,.003],[-.28,.086,.085],[.02,.09,.085],[.32,.06,.035],[.68,.002,.002]],C.white,[0,0,.025]);
-    this.shell(h,[[-.12,.003,.003],[-.07,.055,.04],[.08,.055,.045],[.25,.002,.002]],0x164864,[0,0,.107],[1,1,1],[0,0,0],false,true);
+    this.armor(h,[[-.49,-.13],[.23,-.1],[.72,0],[.23,.1],[-.49,.13],[-.35,0]],C.ink,.16,0);
+    this.facet(h,[[-.32,-.084],[.24,-.065],[.62,0],[.24,.065],[-.32,.084],[-.42,0]],C.white,.065,.105);
+    this.armor(h,[[-.14,-.047],[.19,-.036],[.32,0],[.19,.036],[-.14,.047]],0x265968,.045,.213);
+    this.rail(h,[[-.12,0],[.22,0]],C.cyan,.012,.243,true);
     for(const side of [-1,1]){
-      this.plate(h,[[-.36,side*.1],[.26,side*.105],[.12,side*.20],[-.38,side*.43],[-.53,side*.35],[-.17,side*.19]],C.white,.075,-.035);
-      this.plate(h,[[-.32,side*.17],[.05,side*.17],[-.33,side*.36],[-.44,side*.32]],C.ink,.035,.01);
-      this.plate(h,[[-.41,side*.3],[-.29,side*.26],[-.35,side*.36],[-.47,side*.35]],C.hot,.016,.044);
-      this.shell(h,[[-.57,.003,.003],[-.49,.064,.064],[-.15,.05,.05],[.16,.028,.028],[.29,.002,.002]],C.steel,[0,side*.21,-.03]);
-      for(let j=0;j<4;j++)this.part(h,this.cylinder,j===0?C.gold:C.ink,[-.51+j*.043,side*.21,-.03],[.073,.018,.073],[0,0,Math.PI/2]);
-      this.part(h,this.cylinder,C.cyan,[-.529,side*.21,-.03],[.048,.01,.048],[0,0,Math.PI/2],true);
-      this.tube(h,[[-.25,side*.135,.075],[.1,side*.115,.07],[.44,side*.055,.028]],.008,C.cyan,true);
-      for(let j=0;j<4;j++)this.part(h,this.box,C.ink,[-.29+j*.036,side*.106,.089],[.018,.032,.008]);
-      this.part(h,this.box,C.gold,[-.1,side*.19,.042],[.04,.018,.018]);
-      const jet=this.glow(C.cyan);jet.position.set(-.8,side*.21,-.03);jet.scale.set(.7,.17,1);jet.name=`jet${side}`;g.add(jet);
-      const engine=this.part(g,this.cylinder,0xdbfbff,[-.64,side*.21,-.03],[.018,.23,.018],[0,0,Math.PI/2],true);engine.name=`engine${side}`;
+      this.armor(h,[[-.42,side*.09],[.18,side*.12],[.02,side*.24],[-.44,side*.45],[-.59,side*.39],[-.24,side*.19]],C.edge,.075,-.04);
+      this.armor(h,[[-.39,side*.17],[-.03,side*.17],[-.37,side*.34],[-.49,side*.33]],C.ink,.035,.02);
+      this.armor(h,[[-.46,side*.32],[-.29,side*.28],[-.39,side*.39],[-.53,side*.37]],C.white,.04,.055);
+      this.rail(h,[[-.44,side*.3],[-.16,side*.18],[.15,side*.13]],C.cyan,.011,.075,true);
+      this.armor(h,[[-.57,side*.15],[-.18,side*.15],[.20,side*.21],[-.18,side*.27],[-.57,side*.27]],C.steel,.13,-.02);
+      this.vents(h,-.34,side*.21,5,.065,.055);
+      this.part(h,this.box,C.ink,[-.58,side*.21,0],[.09,.15,.12]);
+      this.part(h,this.box,C.cyan,[-.629,side*.21,0],[.009,.092,.066],[0,0,0],true);
+      this.part(h,this.box,C.gold,[.18,side*.105,.04],[.23,.029,.03]);
+      this.part(h,this.box,C.cyan,[.31,side*.105,.045],[.048,.014,.014],[0,0,0],true);
+      this.vents(h,-.25,side*.092,4,.035,.209);
+      const jet=this.glow(C.cyan);jet.position.set(-.8,side*.21,0);jet.scale.set(.56,.12,1);jet.name='jet'+side;g.add(jet);
+      const engine=this.part(g,this.box,0xe0ffff,[-.70,side*.21,0],[.16,.025,.025],[0,0,0],true);engine.name='engine'+side;
     }
-    this.part(h,this.box,C.gold,[-.25,0,.106],[.026,.055,.01]);
     this.merge(h);this.contour(h);this.models.set('sculpt-ship',g);return g.clone(true);
   }
   enemy(type,r){
-    const key=`sculpt-${type}/${r}`;if(this.models.has(key))return this.models.get(key).clone(true);
+    const key='sculpt-'+type+'/'+r;if(this.models.has(key))return this.models.get(key).clone(true);
     const g=new THREE.Group(),h=new THREE.Group(),limbs=new THREE.Group();limbs.name='limbs';g.add(h,limbs);
-    const palette={drone:0x39505f,dart:0x823b31,weaver:0x483557,sentinel:0x395566,carrier:0x775332};
+    const color={drone:0x78908c,dart:0xaa5b48,weaver:0x807798,sentinel:0x698393,carrier:0xa28a63}[type]||C.edge;
+    const energy=type==='weaver'?0xdb8aca:C.hot;
+    // Combat silhouettes read as five distinct machines even without their color accents.
     if(type==='carrier'){
-      this.shell(h,[[-.35,.01,.01],[-.24,.24,.16],[.16,.28,.18],[.42,.07,.1],[.5,.01,.01]],palette[type]);
-      for(const side of [-1,1])for(let i=0;i<3;i++){this.shell(h,[[-.25,.01,.01],[-.1,.09,.07],[.21,.07,.06],[.4,.01,.01]],i===1?C.gold:C.ink,[i*.03,side*(.23+i*.045),i*.025]);this.part(h,this.sphere,C.hot,[-.06+i*.13,side*.21,.18],[.027,.027,.027],[0,0,0],true);}
-      this.ring(h,.18,.025,C.ink,.19);this.ring(h,.165,.01,C.gold,.21);
+      this.armor(h,[[-.39,-.17],[-.22,-.30],[.30,-.30],[.49,-.17],[.49,.17],[.30,.30],[-.22,.30],[-.39,.17]],C.ink,.25,0);
+      for(const side of [-1,1]){
+        this.facet(h,[[-.32,side*.12],[.25,side*.12],[.42,side*.25],[.22,side*.37],[-.21,side*.37],[-.42,side*.26]],color,.08,.15);
+        this.vents(h,.04,side*.26,8,.095,.279);
+        this.rail(h,[[-.30,side*.18],[.18,side*.18],[.3,side*.25]],C.hot,.012,.28,true);
+        for(let j=0;j<3;j++)this.part(h,this.box,C.ink,[-.28+j*.19,side*.39,.02],[.13,.10,.18]);
+      }
+      this.armor(h,[[-.45,-.09],[.28,-.09],[.40,0],[.28,.09],[-.45,.09]],C.steel,.055,.185);
     }else if(type==='sentinel'){
-      this.shell(h,[[-.4,.01,.01],[-.18,.16,.12],[.25,.19,.15],[.44,.02,.02]],palette[type]);
-      for(const side of [-1,1]){this.shell(h,[[-.4,.01,.01],[-.26,.09,.07],[.22,.09,.08],[.4,.01,.01]],C.ink,[0,side*.31,-.02]);this.plate(h,[[-.23,side*.13],[.22,side*.19],[.28,side*.35],[-.10,side*.42],[-.34,side*.27]],C.copper,.07,.035);for(let i=0;i<4;i++)this.part(h,this.box,C.gold,[.03+i*.055,side*.29,.09],[.019,.11,.014]);}
+      this.armor(h,[[-.34,-.18],[.24,-.22],[.4,0],[.24,.22],[-.34,.18],[-.45,0]],C.ink,.22,0);
+      for(const side of [-1,1]){
+        this.facet(h,[[-.41,side*.13],[-.17,side*.18],[.12,side*.14],[.32,side*.34],[.12,side*.48],[-.33,side*.4]],color,.16,.02);
+        this.armor(h,[[-.32,side*.21],[-.06,side*.24],[.11,side*.38],[-.25,side*.34]],C.ink,.03,.252);
+        this.vents(h,-.12,side*.295,5,.065,.286,side*.18);
+        this.part(h,this.box,C.steel,[-.31,side*.12,.14],[.40,.08,.10]);
+        this.part(h,this.box,energy,[-.52,side*.12,.15],[.015,.055,.04],[0,0,0],true);
+        this.rail(h,[[.20,side*.21],[.26,side*.34],[.13,side*.41]],energy,.012,.277,true);
+      }
     }else if(type==='weaver'){
-      this.shell(h,[[-.36,.002,.002],[-.17,.125,.1],[.05,.13,.13],[.23,.035,.05],[.29,.002,.002]],palette[type]);
-      for(const side of [-1,1])for(let i=0;i<3;i++){const limb=new THREE.Group();limb.name='fin';limb.userData.side=side;limb.userData.phase=i;this.tube(limb,[[.05,side*.08,-.03],[.19,side*(.24+i*.05),-.08-i*.04],[.42+i*.05,side*(.26+i*.06),-.15]],.035-i*.007,C.steel);this.shell(limb,[[-.19,.002,.002],[-.10,.052,.025],[.12,.036,.022],[.28,.002,.002]],i===1?0xa2658e:C.copper,[.27+i*.055,side*(.21+i*.045),-.07-i*.025],[1,1,1],[0,0,side*.35]);limbs.add(this.merge(limb));}
+      this.armor(h,[[-.40,0],[-.17,-.15],[.15,-.12],[.28,0],[.15,.12],[-.17,.15]],C.ink,.19,0);
+      this.facet(h,[[-.30,0],[-.10,-.095],[.12,-.07],[.19,0],[.12,.07],[-.10,.095]],color,.075,.125);
+      for(const side of [-1,1])for(let i=0;i<3;i++){
+        const limb=new THREE.Group();limb.name='fin';limb.userData.side=side;limb.userData.phase=i;
+        const x=.02+i*.075,y=side*(.12+i*.07);
+        this.armor(limb,[[x-.09,y],[x+.13,y+side*.04],[x+.36,y+side*.19],[x+.21,y+side*.22],[x-.04,y+side*.09]],i===1?color:C.steel,.05,-i*.04);
+        this.rail(limb,[[x+.02,y+side*.05],[x+.25,y+side*.16]],energy,.011,.034-i*.04,true);
+        this.part(limb,this.box,C.gold,[x+.10,y+side*.06,.02-i*.04],[.032,.06,.028]);
+        limbs.add(this.merge(limb));
+      }
     }else{
-      this.shell(h,[[-.5,.002,.002],[-.21,.115,.09],[.08,.15,.12],[.26,.07,.09],[.34,.002,.002]],palette[type]);
-      for(const side of [-1,1]){this.shell(h,[[-.18,.002,.002],[-.06,.045,.035],[.12,.06,.025],[.32,.002,.002]],type==='dart'?C.copper:C.steel,[.09,side*(type==='dart'?.19:.22),-.02],[1,1,1],[0,0,side*.55]);this.tube(h,[[-.30,side*.06,.085],[-.06,side*.10,.115],[.14,side*.07,.10]],.009,type==='dart'?C.hot:0xffb65a,true);}
+      const dart=type==='dart';
+      this.armor(h,dart?[[-.88,0],[-.12,-.095],[.30,-.07],[.39,0],[.30,.07],[-.12,.095]]:[[-.55,0],[-.17,-.16],[.21,-.13],[.35,0],[.21,.13],[-.17,.16]],C.ink,.16,0);
+      if(dart)for(const side of [-1,1]){
+        this.part(h,this.box,C.ink,[-.49,side*.083,.02],[.63,.038,.065]);
+        this.part(h,this.box,C.gold,[-.75,side*.083,.02],[.15,.046,.05]);
+        this.rail(h,[[-.66,side*.083],[-.21,side*.083]],C.hot,.009,.062,true);
+        this.part(h,this.box,C.steel,[.36,side*.15,-.04],[.33,.075,.10]);
+        this.part(h,this.box,C.hot,[.535,side*.15,-.04],[.009,.048,.055],[0,0,0],true);
+      }
+      this.facet(h,dart?[[-.76,0],[-.10,-.062],[.27,-.04],[.34,0],[.27,.04],[-.10,.062]]:[[-.49,0],[-.10,-.10],[.23,-.06],[.29,0],[.23,.06],[-.10,.10]],color,.065,.105);
+      for(const side of [-1,1]){
+        this.armor(h,dart?[[.02,side*.08],[.34,side*.1],[.60,side*.24],[.44,side*.22],[-.12,side*.12]]:[[-.28,side*.12],[.12,side*.16],[.35,side*.32],[.2,side*.36],[-.19,side*.23]],dart?C.steel:color,.07,-.025);
+        this.armor(h,[[.02,side*.18],[.18,side*.2],[.28,side*.3],[.16,side*.28]],C.ink,.023,.024);
+        this.rail(h,[[-.31,side*.055],[-.04,side*.082],[.15,side*.05]],energy,.013,.215,true);
+        this.vents(h,.14,side*.17,3,.045,.08,side*.2);
+      }
     }
-    this.ring(h,.09,.02,C.ink,.15);this.ring(h,.075,.008,type==='weaver'?0xdb75da:C.hot,.17,true);this.merge(h);this.contour(h);
-    const core=this.part(g,this.sphere,C.hot,[-.045,0,.175],[.055,.055,.025],[0,0,0],true);core.name='core';
-    const glow=this.glow(type==='weaver'?0xc55ad6:C.hot,.3);glow.position.set(-.045,0,.18);g.add(glow);
-    const jet=this.glow(C.hot);jet.name='jet';jet.position.set(.5,0,-.03);jet.scale.set(.45,.12,1);g.add(jet);
+    this.part(h,this.box,C.ink,[-.07,0,.245],[.19,.13,.035]);
+    this.part(h,this.box,C.edge,[-.06,0,.262],[.15,.085,.015]);
+    for(const x of [-.105,-.07,-.035])this.part(h,this.box,C.ink,[x,0,.295],[.009,.04,.018]);
+    this.part(h,this.box,0xffe8d5,[-.08,-.014,.294],[.065,.005,.012],[0,0,0],true);
+    this.merge(h);this.contour(h);
+    const core=this.part(g,this.box,energy,[-.08,0,.278],[.10,.033,.022],[0,0,0],true);core.name='core';
+    const jet=this.glow(energy);jet.name='jet';jet.position.set(.48,0,-.03);jet.scale.set(.35,.09,1);g.add(jet);
     g.scale.setScalar(r/.24);this.models.set(key,g);return g.clone(true);
   }
   boss(type,r){
-    const key=`sculpt-${type}/${r}`;if(this.models.has(key))return this.models.get(key).clone(true);
+    const key='sculpt-'+type+'/'+r;if(this.models.has(key))return this.models.get(key).clone(true);
     const g=new THREE.Group(),h=new THREE.Group(),machine=new THREE.Group();machine.name='machinery';g.add(h,machine);
     if(type==='gatekeeper'){
-      this.shell(h,[[-r*.8,.005,.005],[-r*.25,r*.56,r*.30],[r*.95,r*.48,r*.25],[r*1.9,r*.2,r*.12],[r*2.2,.005,.005]],C.ink,[0,0,-.18]);
+      this.armor(h,[[-r*.85,-r*.30],[r*.05,-r*.69],[r*1.6,-r*.49],[r*2.2,-r*.18],[r*2.2,r*.18],[r*1.6,r*.49],[r*.05,r*.69],[-r*.85,r*.30]],C.ink,.38,-.12);
       for(const side of [-1,1]){
-        this.shell(h,[[-.3,.002,.002],[.1,.16,.1],[.8,.13,.11],[1.3,.002,.002]],C.copper,[.1,side*r*.4,.04],[1,1,1],[0,0,side*-.18]);
-        this.tube(h,[[r*.25,side*r*.30,.14],[r*.8,side*r*.35,.13],[r*1.5,side*r*.25,.02]],.018,C.gold);
-        this.shell(h,[[0,.002,.002],[.15,.12,.12],[.55,.1,.1],[.78,.002,.002]],C.steel,[r*.85,side*r*.60,-.16]);
-        const jet=this.glow(C.hot);jet.position.set(r*2.35,side*r*.6,-.16);jet.scale.set(1.3,.32,1);g.add(jet);
+        this.facet(h,[[0,side*r*.32],[r*.55,side*r*.26],[r*1.8,side*r*.32],[r*1.5,side*r*.56],[r*.22,side*r*.61]],C.edge,.12,.12);
+        this.armor(h,[[r*.22,side*r*.39],[r*1.4,side*r*.34],[r*1.15,side*r*.49],[r*.3,side*r*.51]],C.steel,.04,.3);
+        this.vents(h,r*.85,side*r*.43,11,.11,.341,side*-.06);
+        this.rail(h,[[r*.10,side*r*.28],[r*1.1,side*r*.24],[r*1.8,side*r*.31]],C.hot,.017,.328,true);
         const claw=new THREE.Group();claw.name='claw';claw.userData.side=side;
-        this.tube(claw,[[r*.4,side*r*.4,-.2],[-r*.3,side*r*.85,-.1],[-r*1.25,side*r*1.05,.05],[-r*1.75,side*r*.62,.07]],.11,C.ink);
-        for(let i=0;i<6;i++){const a=i/5;this.shell(claw,[[-.13,.003,.003],[-.06,.095,.085],[.05,.095,.085],[.16,.003,.003]],i%2?C.copper:C.steel,[-r*(.05+a*1.32),side*r*(.62+Math.sin(a*2.4)*.42),.02],[1,1,1],[0,0,side*-.30]);}
-        this.tube(claw,[[r*.1,side*r*.60,.14],[-r*.8,side*r*.95,.18],[-r*1.5,side*r*.66,.18]],.012,C.hot,true);
-        this.part(claw,this.cylinder,C.gold,[-r*1.63,side*r*.64,.04],[.085,.32,.085],[0,0,Math.PI/2]);this.merge(claw);machine.add(claw);
+        this.armor(claw,[[r*.6,side*r*.40],[-r*.1,side*r*.85],[-r*1.45,side*r*1.1],[-r*1.84,side*r*.55],[-r*1.54,side*r*.45],[-r*1.13,side*r*.72],[r*.3,side*r*.35]],C.steel,.17,-.14);
+        this.armor(claw,[[-r*.2,side*r*.74],[-r*1.35,side*r*.98],[-r*1.6,side*r*.62],[-r*1.15,side*r*.81]],C.edge,.05,-.019);
+        this.rail(claw,[[-r*.23,side*r*.63],[-r*1.07,side*r*.84],[-r*1.52,side*r*.58]],C.hot,.012,.04,true);
+        for(let j=0;j<4;j++)this.part(claw,this.box,C.ink,[-r*(.24+j*.26),side*r*(.65+j*.05),.055],[.055,.12,.04],[0,0,side*.18]);
+        this.part(claw,this.box,C.ink,[-r*1.6,side*r*.6,-.07],[.32,.12,.11]);this.part(claw,this.box,0xffc19a,[-r*1.85,side*r*.6,-.07],[.035,.075,.05],[0,0,0],true);
+        machine.add(this.merge(claw));
+        this.armor(h,[[r*1.18,side*r*.55],[r*1.65,side*r*.55],[r*2.05,side*r*.7],[r*1.35,side*r*.76]],C.ink,.21,-.15);
+        const jet=this.glow(C.hot);jet.position.set(r*2.22,side*r*.64,-.13);jet.scale.set(.85,.2,1);g.add(jet);
       }
-      this.ring(h,r*.60,.07,C.steel,.04);this.ring(h,r*.52,.021,C.gold,.09);
+
     }else{
-      for(let i=0;i<6;i++){const z=-.55-i*.31,rr=r*(.6-i*.065);this.ring(h,rr,.065,i%2?C.ink:C.steel,z);this.ring(h,rr+.01,.008,C.hot,z+.03,true);}
-      for(let i=0;i<6;i++){const a=i/6*Math.PI*2;this.tube(h,[[Math.cos(a)*r*.5,Math.sin(a)*r*.5,-.4],[Math.cos(a+.25)*r*.47,Math.sin(a+.25)*r*.47,-1.15],[Math.cos(a+.5)*r*.25,Math.sin(a+.5)*r*.25,-2.2]],.028,C.copper);}
-      this.part(h,new THREE.TorusGeometry(r*.68,r*.25,16,64),C.ink,[0,0,-.25]);
-      this.ring(h,r*.72,.032,C.gold,.1);this.ring(h,r*.62,.04,C.steel,.15);
-      for(let i=0;i<10;i++){
-        const a=i/10*Math.PI*2,arm=new THREE.Group();arm.name='petal';arm.rotation.z=a;arm.userData.phase=a;
-        this.tube(arm,[[r*.65,0,-.35],[r*1.15,-.2,-.7],[r*1.75,-.08,-.52],[r*2.1,.17,-.20]],.11,C.ink);
-        this.shell(arm,[[-r*.1,.002,.002],[r*.2,.21,.12],[r*.66,.28,.17],[r*1.16,.15,.1],[r*1.4,.002,.002]],i%2?C.steel:C.copper,[r*.78,0,-.28],[1,1,1],[0,-.1,.06]);
-        this.shell(arm,[[0,.002,.002],[.15,.1,.09],[.6,.12,.1],[.9,.002,.002]],C.ink,[r*1.1,.01,-.1],[1,1,1],[0,0,.05]);
-        this.tube(arm,[[r*.88,-.06,.05],[r*1.32,-.1,.09],[r*1.87,.04,-.03]],.014,i%2?0xffae6b:0xff693f,true);
-        for(let j=0;j<4;j++)this.part(arm,this.box,C.gold,[r*(1.04+j*.13),-.095,-.015],[.025,.1,.018],[0,0,.08]);
-        this.tube(arm,[[r*.67,.05,-.4],[r*.97,.2,-.83],[r*1.51,.16,-.83],[r*1.83,.1,-.5]],.037,C.copper);
-        this.merge(arm);machine.add(arm);
+      // Cathedral: a vertical siege bastion with four segmented outriggers and a deep rear reactor.
+      this.armor(h,[[-r*.57,-r*.92],[r*.16,-r*1.18],[r*.78,-r*.7],[r*1.1,0],[r*.78,r*.7],[r*.16,r*1.18],[-r*.57,r*.92],[-r*.85,0]],C.ink,.54,-.3);
+      for(const side of [-1,1]){
+        this.facet(h,[[-r*.40,side*r*.35],[r*.31,side*r*.3],[r*.66,side*r*.76],[r*.12,side*r*1.25],[-r*.33,side*r*1.07]],C.edge,.14,.035);
+        this.armor(h,[[-r*.24,side*r*.5],[r*.21,side*r*.45],[r*.40,side*r*.76],[r*.10,side*r*1.04],[-r*.21,side*r*.96]],C.steel,.06,.245);
+        this.vents(h,r*.06,side*r*.75,8,.21,.303);
+        this.rail(h,[[-r*.35,side*r*.39],[-r*.30,side*r*.92],[r*.06,side*r*1.15]],C.hot,.018,.291,true);
+        this.armor(h,[[r*.32,side*r*.32],[r*.8,side*r*.43],[r*1.0,side*r*1.45],[r*.73,side*r*1.8],[r*.51,side*r*1.27]],C.steel,.22,-.39);
+        for(let j=0;j<3;j++)this.armor(h,[[r*.60,side*r*(.63+j*.26)],[r*.87,side*r*(.76+j*.26)],[r*.91,side*r*(.94+j*.26)],[r*.67,side*r*(.83+j*.26)]],C.edge,.08,-.23);
       }
-      const turbine=new THREE.Group();turbine.name='turbine';this.ring(turbine,r*1.54,.09,C.steel,-.85);this.ring(turbine,r*1.55,.014,C.hot,-.73,true);
-      for(let i=0;i<32;i++){const a=i/32*Math.PI*2;this.part(turbine,this.box,i%2?C.ink:C.gold,[Math.cos(a)*r*1.48,Math.sin(a)*r*1.48,-.84],[.08,.27,.13],[.2,0,a+.35]);}machine.add(this.merge(turbine));
-      const iris=new THREE.Group();iris.name='iris';for(let i=0;i<12;i++){const a=i/12*Math.PI*2,leaf=new THREE.Group();leaf.rotation.z=a;this.plate(leaf,[[r*.22,-.02],[r*.51,-.13],[r*.67,.07],[r*.39,.16]],i%2?C.steel:C.gold,.1,.2);iris.add(this.merge(leaf));}machine.add(iris);
+      for(let i=0;i<4;i++){
+        const side=i<2?1:-1,outer=i%2,arm=new THREE.Group();arm.name='petal';arm.userData.phase=i;arm.rotation.z=side*(outer?.16:-.12);
+        const x=outer?.33:-.34;
+        this.armor(arm,[[x,side*r*.65],[x+.26,side*r*.94],[x+.39,side*r*1.98],[x+.15,side*r*2.36],[x-.11,side*r*1.72],[x-.16,side*r*.84]],C.ink,.20,-.57);
+        this.facet(arm,[[x+.02,side*r*.96],[x+.23,side*r*1.08],[x+.29,side*r*1.95],[x+.15,side*r*2.18],[x,side*r*1.65]],outer?C.copper:C.edge,.10,-.42);
+        this.rail(arm,[[x+.10,side*r*1.02],[x+.14,side*r*1.71],[x+.20,side*r*2.02]],C.hot,.013,-.269,true);
+        for(let j=0;j<5;j++)this.part(arm,this.box,C.ink,[x+.13,side*r*(1.1+j*.16),-.26],[.16,.024,.021]);
+        machine.add(this.merge(arm));
+      }
+      // Faceted reactor tunnel gives real parallax through the open armored front.
+      for(let j=0;j<5;j++){
+        const ring=new THREE.Group();ring.rotation.z=Math.PI/8;
+        this.part(ring,new THREE.TorusGeometry(r*(.5-j*.045),.05,4,8),j%2?C.edge:C.ink,[0,0,-.5-j*.3]);
+        this.merge(ring);h.add(ring);
+      }
+      const turbine=new THREE.Group();turbine.name='turbine';
+      for(let i=0;i<16;i++){const a=i/16*Math.PI*2;this.part(turbine,this.box,i%2?C.steel:C.gold,[Math.cos(a)*r*.49,Math.sin(a)*r*.49,-.4],[.055,.19,.055],[0,0,a+.4]);}machine.add(this.merge(turbine));
+      const iris=new THREE.Group();iris.name='iris';for(let i=0;i<6;i++){const a=i/6*Math.PI*2,leaf=new THREE.Group();leaf.rotation.z=a;this.armor(leaf,[[r*.18,-.06],[r*.42,-.11],[r*.53,.07],[r*.28,.11]],C.edge,.065,.08);iris.add(this.merge(leaf));}machine.add(iris);
+
     }
-    this.part(h,this.sphere,0x94352c,[0,0,.13],[r*.46,r*.46,r*.2]);this.ring(h,r*.43,.016,C.hot,.26,true);this.merge(h);
-    const core=this.part(g,this.sphere,0xffb77b,[0,0,.27],[r*.23,r*.23,r*.1],[0,0,0],true);core.name='core';const energy=this.glow(C.hot,r*1.7);energy.position.z=.33;g.add(energy);
+    for(const part of BOSS_PART_LAYOUTS[type]||[]){
+      const side=Math.sign(part.y),x=part.x,y=part.y;
+      // Each target is physically bolted into a reinforced spine; no floating UI-like nodes.
+      this.facet(h,[[x+.03,y-side*.06],[x+.31,y+side*.05],[x+.48,y-side*.22],[r*.42,y*.53],[r*.22,y*.51],[x+.25,y-side*.17]],C.steel,.14,-.17);
+      this.rail(h,[[r*.30,y*.53],[x+.35,y-side*.25],[x+.17,y-side*.02]],C.ink,.065,-.01);
+      this.rail(h,[[r*.30,y*.53],[x+.35,y-side*.25],[x+.17,y-side*.02]],C.gold,.016,.035);
+      for(const [bx,by] of [[x+.27,y-side*.14],[r*.30,y*.56]]){
+        this.part(h,this.box,C.ink,[bx,by,.055],[.072,.072,.036],[0,0,Math.PI/4]);
+        this.part(h,this.box,C.edge,[bx,by,.078],[.037,.037,.02],[0,0,Math.PI/4]);
+      }
+      this.socket(g,x,y,part.r,part.id);
+    }
+    for(const side of [-1,1])for(let i=0;i<3;i++){
+      const x=r*(.2+i*.18),y=side*r*(type==='gatekeeper'?.48:.54+i*.18);
+      this.part(h,this.box,C.ink,[x,y,.24],[.042,.042,.02],[0,0,Math.PI/4]);
+      this.part(h,this.box,C.edge,[x,y,.255],[.018,.018,.015],[0,0,Math.PI/4]);
+    }
+    const frame=[[-r*.46,-r*.20],[-r*.23,-r*.41],[r*.24,-r*.41],[r*.47,-r*.2],[r*.47,r*.2],[r*.24,r*.41],[-r*.23,r*.41],[-r*.46,r*.2]];
+    this.armor(h,frame,C.ink,.20,.13);
+    for(const side of [-1,1])this.rail(h,[[-r*.37,side*r*.17],[-r*.19,side*r*.31],[r*.22,side*r*.31],[r*.37,side*r*.17]],C.gold,.023,.26);
+    for(let i=0;i<8;i++){
+      const a=i/8*Math.PI*2,x=Math.cos(a)*r*.30,y=Math.sin(a)*r*.30;
+      this.part(h,this.box,C.steel,[x,y,.3],[r*.15,r*.13,.12],[0,.22,a]);
+      this.part(h,this.box,C.edge,[x*1.12,y*1.12,.35],[r*.10,r*.07,.07],[0,0,a]);
+      this.part(h,this.box,C.hot,[x*.88,y*.88,.37],[r*.075,r*.024,.018],[0,0,a],true);
+    }
+    for(const side of [-1,1]){
+      this.part(h,this.box,C.ink,[side*r*.14,0,.42],[r*.05,r*.37,.06]);
+      this.part(h,this.box,C.gold,[side*r*.20,0,.41],[r*.035,r*.31,.025]);
+    }
+    this.part(h,this.box,0xffead6,[0,-r*.085,.45],[r*.18,r*.024,.019],[0,0,0],true);
+    this.merge(h);
+    const core=this.part(g,new THREE.CylinderGeometry(1,1,1,6),0xffb782,[0,0,.32],[r*.19,r*.10,r*.19],[Math.PI/2,0,0],true);core.name='core';
     this.models.set(key,g);return g.clone(true);
   }
   setpiece(name){
