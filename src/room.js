@@ -19,7 +19,7 @@ export class RoomLock {
     this.root=root;this.onLost=onLost;this.onChange=onChange;
     this.position=new THREE.Vector3();this.orientation=new THREE.Quaternion();this.scale=new THREE.Vector3();
     this.referenceSpace=null;this.hasPlacement=false;this.lost=false;this.requiresRecenter=false;this.mode='unplaced';
-    this.onReset=()=>this.invalidate();
+    this.onReset=event=>this.rebase(event.transform);
   }
   connect(space){
     if(space===this.referenceSpace)return;
@@ -32,10 +32,22 @@ export class RoomLock {
     this.position.copy(this.root.position);this.orientation.copy(this.root.quaternion);this.scale.copy(this.root.scale);
     this.hasPlacement=true;this.lost=false;this.requiresRecenter=false;this.mode=deployed?'fixed':'preview';
   }
+  rebase(transform){
+    if(!this.hasPlacement||this.requiresRecenter)return;
+    const elements=transform?.matrix;
+    if(!elements||elements.length!==16||!Array.from(elements).every(Number.isFinite)){this.invalidate();return;}
+    const delta=new THREE.Matrix4().fromArray(elements);
+    if(Math.abs(delta.determinant()-1)>1e-4){this.invalidate();return;}
+    // WebXR gives the new origin in the OLD coordinate system. Change the
+    // saved coordinates, not the physical placement. Never sample head yaw.
+    const placement=new THREE.Matrix4().compose(this.position,this.orientation,this.scale);
+    delta.invert().multiply(placement).decompose(this.position,this.orientation,this.scale);
+    this.update();this.onChange();
+  }
   invalidate(){
     if(!this.hasPlacement)return;
-    // System recenter means establish a NEW straight-ahead placement. Applying
-    // the inverse reset transform would cancel the player's recenter request.
+    // An unknown origin change cannot be compensated. Pause and wait for an
+    // explicit X/recenter action; never chase the player's current gaze.
     this.requiresRecenter=true;
     if(!this.lost){this.lost=true;this.onLost();}
     this.onChange();

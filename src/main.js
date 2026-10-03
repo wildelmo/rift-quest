@@ -12,7 +12,7 @@ const game = new Game(), sound = new Sound(), menu = new PauseMenu();
 let view;
 try { view = new View($('viewport')); }
 catch (error) { $('xr-status').textContent = `3D graphics could not start: ${error.message}. Enable hardware acceleration and reload.`; $('enter-xr').disabled = true; $('practice').disabled = true; throw error; }
-const roomLock=new RoomLock(view.root,{onLost:()=>setPaused(true),onChange:()=>{motionPilot.reset();motionCue=null;lastPose=null;if(roomLock.requiresRecenter)needsPlacement=true;}});
+const roomLock=new RoomLock(view.root,{onLost:()=>setPaused(true),onChange:()=>{motionPilot.reset();motionCue=null;lastPose=null;}});
 let storedSettings;
 try { storedSettings = JSON.parse(localStorage.getItem('rift-settings')); } catch {}
 const settings = normalizeSettings(storedSettings);

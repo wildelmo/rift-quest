@@ -19,9 +19,9 @@ await page.addInitScript(()=>{
 await page.goto('http://localhost:5173/');await page.waitForFunction(()=>!!window.__rift);await page.click('#enter-xr');await page.waitForFunction(()=>window.__rift.view.renderer.xr.isPresenting);
 const report=await page.evaluate(async()=>{
  const T=await import('/node_modules/three/build/three.module.js'),r=__rift,v=r.view,g=r.game;
- let yaw=.26,head=new T.Vector3(.3,1.7,.2),missing=false,anchorCalls=0;
+ let yaw=.26,head=new T.Vector3(.3,1.7,.2),missing=false,anchorCalls=0;const origin=new T.Matrix4(),originInverse=new T.Matrix4();
  const q=()=>new T.Quaternion().setFromEuler(new T.Euler(.12,yaw,.06,'YXZ'));
- const transform=(p,o)=>({position:p,orientation:o,matrix:new T.Matrix4().compose(p,o,new T.Vector3(1,1,1)).elements});
+ const transform=(p,o)=>{const matrix=originInverse.clone().multiply(new T.Matrix4().compose(p,o,new T.Vector3(1,1,1)));const position=new T.Vector3(),orientation=new T.Quaternion();matrix.decompose(position,orientation,new T.Vector3());return{position,orientation,matrix:matrix.elements};};
  const projection=new T.PerspectiveCamera(88,.75,.01,100).projectionMatrix.elements;
  const frame={getViewerPose:()=>missing?null:{emulatedPosition:false,transform:transform(head,q()),views:['left','right'].map(eye=>({eye,projectionMatrix:projection,transform:transform(head.clone().add(new T.Vector3(eye==='left'?-.032:.032,0,0).applyQuaternion(q())),q())}))},getPose:source=>transform(head.clone().add(new T.Vector3(.2,-.4,-.1)),q()),createAnchor:()=>{anchorCalls++;throw Error('native anchor must not be requested');}};
  r.settings.controls='stick';let time=1000;const tick=()=>session.tick(time+=1000/90,frame);
@@ -33,13 +33,26 @@ const report=await page.evaluate(async()=>{
  g.nextWave=g.nextPickup=999999;g.miniSpawned=g.bossSpawned=true;g.setpieces=new Set([30,108,150]);g.player.invincible=999;let maxError=0;
  for(let i=0;i<27000;i++){yaw=-.31+Math.sin(i*.002)*.5;head.x=.3+Math.sin(i*.001)*.12;tick();maxError=Math.max(maxError,...v.root.matrix.elements.map((x,n)=>Math.abs(x-saved.elements[n])));}
  const elapsed=g.time;
- // Headset recenter, both event varieties, must yield fresh placement while paused.
- const resetResults=[];for(const known of [true,false]){yaw=known?.5:-.7;const e=new Event('reset');e.transform=known?{matrix:new T.Matrix4().makeRotationY(.26).elements}:null;session.space.dispatchEvent(e);tick();const n=new T.Vector3(0,0,1).applyQuaternion(v.root.quaternion),toward=head.clone().sub(v.root.position).setY(0).normalize();resetResults.push({paused:r.paused,error:n.distanceTo(toward),needs:r.roomLock.requiresRecenter});document.getElementById('resume').click();tick();}
+ // Inject one-degree origin changes every ten seconds while the player turns
+ // left. Check physical room placement, not just unchanged local coordinates.
+ let physicalError=0,eyeError=0,stayedPlaying=true;
+ for(let i=0;i<27000;i++){
+   yaw=-.31+i/27000*Math.PI/6;
+   if(i%900===0){const delta=new T.Matrix4().compose(new T.Vector3(.002,0,-.001),new T.Quaternion().setFromAxisAngle(new T.Vector3(0,1,0),Math.PI/180),new T.Vector3(1,1,1));origin.multiply(delta);originInverse.copy(origin).invert();const e=new Event('reset');e.transform={matrix:delta.elements};session.space.dispatchEvent(e);}
+   tick();stayedPlaying=stayedPlaying&&!r.paused;
+   const physical=origin.clone().multiply(v.root.matrix);physicalError=Math.max(physicalError,...physical.elements.map((x,n)=>Math.abs(x-saved.elements[n])));
+   const leftPhysical=origin.clone().multiply(camera.cameras[0].matrixWorld),expected=head.clone().add(new T.Vector3(-.032,0,0).applyQuaternion(q()));eyeError=Math.max(eyeError,new T.Vector3().setFromMatrixPosition(leftPhysical).distanceTo(expected));
+ }
+ // Unknown mapping: pause, block Resume, and never auto-place toward gaze.
+ const beforeUnknown=v.root.matrix.clone(),unknown=new Event('reset');unknown.transform=null;session.space.dispatchEvent(unknown);
+ for(let i=0;i<900;i++){yaw+=.0002;tick();}document.getElementById('resume').click();tick();
+ const unknownBlocked=r.paused&&r.roomLock.requiresRecenter,unknownMoved=!v.root.matrix.equals(beforeUnknown);
+ const facingError=()=>{const physical=origin.clone().multiply(v.root.matrix),rotation=new T.Quaternion();physical.decompose(new T.Vector3(),rotation,new T.Vector3());return new T.Vector3(0,0,1).applyQuaternion(rotation).distanceTo(head.clone().sub(new T.Vector3().setFromMatrixPosition(physical)).setY(0).normalize());};
  // In-game X, then level restart, must not retain an old yaw.
- yaw=.9;session.inputSources[0].gamepad.buttons[4].pressed=true;tick();session.inputSources[0].gamepad.buttons[4].pressed=false;tick();const xError=new T.Vector3(0,0,1).applyQuaternion(v.root.quaternion).distanceTo(head.clone().sub(v.root.position).setY(0).normalize());
- document.getElementById('resume').click();tick();yaw=-1.1;document.getElementById('restart').click();tick();const restartPending=r.deploymentPending,restartPaused=r.paused;document.getElementById('resume').click();tick();const restartError=new T.Vector3(0,0,1).applyQuaternion(v.root.quaternion).distanceTo(head.clone().sub(v.root.position).setY(0).normalize());
+ yaw=.9;session.inputSources[0].gamepad.buttons[4].pressed=true;tick();session.inputSources[0].gamepad.buttons[4].pressed=false;tick();const xError=facingError();
+ document.getElementById('resume').click();tick();yaw=-1.1;document.getElementById('restart').click();tick();const restartPending=r.deploymentPending,restartPaused=r.paused;document.getElementById('resume').click();tick();const restartError=facingError();
  missing=true;tick();document.getElementById('resume').click();const lossBlocked=r.paused;missing=false;tick();document.getElementById('resume').click();tick();
- draw(time/1000,true);const result={xr:v.renderer.xr.isPresenting,eyeCount:camera.cameras.length,previewChanged:!preview.equals(saved),squareError,cameraMatches,maxError,elapsed,anchorCalls,requestedAnchors:requestOptions.optionalFeatures?.includes('anchors')||false,resetResults,xError,restartPending,restartPaused,restartError,lossBlocked,alpha:v.renderer.getClearAlpha()};await r.exitGame({navigate:false,closeWindow:false});result.closed=!v.renderer.xr.isPresenting&&document.querySelectorAll('#viewport canvas').length===0;return result;
+ draw(time/1000,true);const result={xr:v.renderer.xr.isPresenting,eyeCount:camera.cameras.length,previewChanged:!preview.equals(saved),squareError,cameraMatches,maxError,elapsed,anchorCalls,requestedAnchors:requestOptions.optionalFeatures?.includes('anchors')||false,physicalError,eyeError,stayedPlaying,unknownBlocked,unknownMoved,xError,restartPending,restartPaused,restartError,lossBlocked,alpha:v.renderer.getClearAlpha()};await r.exitGame({navigate:false,closeWindow:false});result.closed=!v.renderer.xr.isPresenting&&document.querySelectorAll('#viewport canvas').length===0;return result;
 });
-assert.equal(report.xr,true);assert.equal(report.eyeCount,2);assert.equal(report.previewChanged,true);assert.equal(report.cameraMatches,true);assert.ok(report.squareError<1e-8);assert.ok(report.maxError<1e-8);assert.ok(report.elapsed>299);assert.equal(report.anchorCalls,0);assert.equal(report.requestedAnchors,false);for(const reset of report.resetResults){assert.equal(reset.paused,true);assert.ok(reset.error<1e-8);assert.equal(reset.needs,false);}assert.ok(report.xError<1e-8);assert.equal(report.restartPending,true);assert.equal(report.restartPaused,true);assert.ok(report.restartError<1e-8);assert.equal(report.lossBlocked,true);assert.equal(report.alpha,0);assert.equal(report.closed,true);assert.deepEqual(errors,[]);console.log(JSON.stringify({report,errors},null,2));
+assert.equal(report.xr,true);assert.equal(report.eyeCount,2);assert.equal(report.previewChanged,true);assert.equal(report.cameraMatches,true);assert.ok(report.squareError<1e-8);assert.ok(report.maxError<1e-8);assert.ok(report.elapsed>299);assert.equal(report.anchorCalls,0);assert.equal(report.requestedAnchors,false);assert.ok(report.physicalError<1e-8);assert.ok(report.eyeError<1e-8);assert.equal(report.stayedPlaying,true);assert.equal(report.unknownBlocked,true);assert.equal(report.unknownMoved,false);assert.ok(report.xError<1e-8);assert.equal(report.restartPending,true);assert.equal(report.restartPaused,true);assert.ok(report.restartError<1e-8);assert.equal(report.lossBlocked,true);assert.equal(report.alpha,0);assert.equal(report.closed,true);assert.deepEqual(errors,[]);console.log(JSON.stringify({report,errors},null,2));
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
