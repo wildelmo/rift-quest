@@ -18,7 +18,7 @@ const assert = require('node:assert/strict');
   await page.screenshot({path:'.artifacts/combat.png'});
   const combat=await page.evaluate(()=>({hostiles:window.__rift.game.shots.filter(s=>s.hostile).length,drawCalls:window.__rift.view.renderer.info.render.calls,triangles:window.__rift.view.renderer.info.render.triangles}));
   await page.keyboard.press('p');
-  await page.evaluate(()=>{const {game:g,view:v}=window.__rift;g.reset();v.clear();g.spawnBoss();g.boss.entry=0;g.boss.hp=390;for(let i=0;i<90*8;i++){g.player.invincible=10;g.update(1/90,{fire:true});}g.player.invincible=0;g.drainEvents();v.burst({x:-.5,y:.2,color:'orange',size:1.2});});
+  await page.evaluate(()=>{const {game:g,view:v}=window.__rift;g.reset();v.clear();g.spawnBoss();g.boss.entry=0;g.boss.hp=742.5;for(let i=0;i<90*8;i++){g.player.invincible=10;g.update(1/90,{fire:true});}g.player.invincible=0;g.drainEvents();v.burst({x:-.5,y:.2,color:'orange',size:1.2});});
   await page.waitForTimeout(80);await page.keyboard.press('p');await page.evaluate(()=>{document.getElementById('overlay').hidden=true;});
   await page.screenshot({path:'.artifacts/boss.png'});
   const boss=await page.evaluate(()=>({hostiles:window.__rift.game.shots.filter(s=>s.hostile).length,drawCalls:window.__rift.view.renderer.info.render.calls,triangles:window.__rift.view.renderer.info.render.triangles}));

@@ -1,4 +1,5 @@
 import { DIFFICULTIES } from './menu.js';
+import { firePrimary, fireModules, steerMissile, ringHits, LOOT_ROUTE, PICKUP_INFO } from './arsenal.js';
 // All combat coordinates are 2D. Depth belongs exclusively to presentation.
 export const FIELD = { left: -8, right: 8, bottom: -4.5, top: 4.5 };
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -18,7 +19,8 @@ export class Game {
   get tuning() { return DIFFICULTIES[this.difficulty]; }
   reset() {
     this.seed = this.initialSeed; this.nextId = 1; this.time = 0; this.state = 'playing';
-    this.player = { x: -4.8, y: 0, r: .09, hp: 5, shield: 0, invincible: 2, weapon: 'PULSE', level: 1, echo: false, charge: 0, cooldown: 0 };
+    this.player = { x: -4.8, y: 0, r: .09, hp: 5, shield: 0, invincible: 2, weapon: 'PULSE', level: 1, echo: false, vector: 0, missiles: 0, weaponLevels: {}, charge: 0, cooldown: 0, vectorCooldown: 0, missileCooldown: 0 };
+    this.path = []; this.echoWing = { x: -5.3, y: 0, moveY: 0 };
     this.enemies = []; this.shots = []; this.pickups = []; this.effects = []; this.events = [];
     this.score = 0; this.bombs = 2; this.kills = 0; this.grazes = 0; this.wave = 0; this.nextWave = 1; this.nextCurtain = 12; this.nextPickup = 6; this.pickupCycle = 0;this.attackWindow='fans';
     this.bossHold=0;this.act=1;this.setpieces=new Set();this.combo=1;this.comboTime=0;this.miniSpawned = false; this.bossSpawned = false; this.boss = null; this.bombWasDown = false;
@@ -35,7 +37,7 @@ export class Game {
     if((hostile?this.hostileCount:this.friendlyCount)>=budget)return;
     if(hostile)this.hostileCount++;else this.friendlyCount++;
     if (hostile) { vx *= this.tuning.speed; vy *= this.tuning.speed; }
-    this.shots.push({ id: this.nextId++, x, y, px: x, py: y, vx, vy, hostile, damage, kind, r, life: 12, level:hostile?1:this.player.level });
+    const shot = { id: this.nextId++, x, y, px: x, py: y, vx, vy, hostile, damage, kind, r, life: 12, level:hostile?1:this.player.level };this.shots.push(shot);return shot;
   }
   burst(x, y, color, size = 1) { this.emit('burst', { x, y, color, size }); }
   spawnEnemy(type, y, index = 0) {
@@ -60,7 +62,7 @@ export class Game {
   }
   spawnBoss(mini = false) {
     const boss = { id: this.nextId++, type: mini ? 'gatekeeper' : 'cathedral', x: 9, y: 0, homeY: 0, age: 0, r: mini ? .62 : .88,
-      hp: mini ? 150 : 680, maxHp: mini ? 150 : 680, fire: 2.4, entry: 3, phase: 1, pattern: 0, warning: 0, laser: 0, laserY: 0, spiral:.15, corridor:3 };
+      hp: mini ? 280 : 1350, maxHp: mini ? 280 : 1350, fire: 2.4, entry: 3, phase: 1, pattern: 0, warning: 0, laser: 0, laserY: 0, spiral:.15, corridor:3 };
     this.enemies.push(boss); this.boss = boss;
     this.announce(mini ? 'GATEKEEPER APPROACHING' : 'THE CATHEDRAL', mini ? 'Break the core.' : 'A machine too large for this reality.');
     this.emit('boss', { mini });
@@ -69,11 +71,14 @@ export class Game {
   drop(x, y, kind) { this.pickups.push({ id: this.nextId++, x, y, kind, age: 0, r: .25 }); }
   collect(item) {
     const p = this.player;
-    if (item.kind === 'SPREAD' || item.kind === 'LANCE') { p.level = p.weapon === item.kind ? Math.min(3, p.level + 1) : 1; p.weapon = item.kind; }
+    if (['SPREAD','LANCE','RING'].includes(item.kind)) { p.weaponLevels[item.kind] = Math.min(3,(p.weaponLevels[item.kind]||0)+1); p.weapon=item.kind; p.level=p.weaponLevels[item.kind]; }
+    if (item.kind === 'VECTOR') p.vector=Math.min(3,p.vector+1);
+    if (item.kind === 'MISSILE') p.missiles=Math.min(3,p.missiles+1);
     if (item.kind === 'ECHO') p.echo = true;
     if (item.kind === 'SHIELD') { p.shield = Math.min(3, p.shield + 2); p.hp = Math.min(5, p.hp + 1); }
     if (item.kind === 'BOMB') this.bombs = Math.min(5, this.bombs + 1);
-    this.score += 100; this.announce(item.kind === 'ECHO' ? 'ECHO WING ONLINE' : `${item.kind} ACQUIRED`);
+    const level=item.kind==='VECTOR'?p.vector:item.kind==='MISSILE'?p.missiles:p.level;
+    this.score += 100; this.announce(item.kind === 'ECHO' ? 'ECHO WING ONLINE' : `${item.kind} ${['VECTOR','MISSILE','RING','LANCE','SPREAD'].includes(item.kind)?' / '+level:'ACQUIRED'}`,PICKUP_INFO[item.kind]);
     this.emit('pickup', { kind:item.kind,x:p.x,y:p.y,level:p.level });
   }
   hurtPlayer() {
@@ -88,22 +93,15 @@ export class Game {
     if (e.hp <= 0) {
       e.dead = true; this.kills++; this.score += e.maxHp ? (e.type === 'cathedral' ? 10000 : 2500) : e.type === 'carrier' ? 250 : 100;
       this.burst(e.x, e.y, e.maxHp ? 'orange' : 'mint', e.maxHp ? 4 : 1); this.emit('kill', { id:e.id,boss: !!e.maxHp, x:e.x,y:e.y,archetype:e.type,r:e.r,phase:e.phase });
-      if (e.type === 'carrier') this.drop(e.x, e.y, ['SPREAD', 'LANCE', 'SHIELD'][this.wave % 3]);
+      if (e.type === 'carrier') this.drop(e.x, e.y, ['VECTOR','MISSILE','RING','SPREAD','LANCE','SHIELD','BOMB','ECHO'][this.kills % 8]);
       if (e.type === 'gatekeeper') { this.boss = null; this.shots = this.shots.filter(s => !s.hostile); this.drop(e.x - 1, 0, 'ECHO'); this.drop(e.x - .3, 1.2, 'SHIELD'); this.announce('GATE BROKEN', 'They heard you. Keep moving.'); }
       if (e.type === 'cathedral') { this.boss = null; this.shots = []; this.state = 'won'; this.emit('end', { won: true }); }
     }
   }
   shootPlayer() {
-    const p = this.player;
-    const shoot = (x, y, echo = false) => {
-      if(p.weapon==='SPREAD'){const n=p.level===3?3:2;for(let i=-n;i<=n;i++)this.addShot(x,y,16+p.level,i*(1.0+p.level*.09),false,(echo?.55:.8)+p.level*.2,'spread',.045+p.level*.006);}
-      else if(p.weapon==='LANCE'){this.addShot(x,y,24,0,false,echo?1.2:2.5+p.level*.9,'lance',.055+p.level*.01);if(p.level>=2)for(const side of [-1,1])this.addShot(x-.05,y+side*.12,22,0,false,echo?.4:.7,'rail',.03);}
-      else for(const side of [-1,1])this.addShot(x,y+side*.05,18,0,false,echo?.55:.9,'pulse',.045);
-    };
-    shoot(p.x + .28, p.y);
-    if (p.echo) shoot(p.x - .3, p.y + .45, true);
-    p.cooldown = p.weapon==='LANCE'?.16-p.level*.012:.095-p.level*.007;
-    this.emit('shoot', { x: p.x, y:p.y,weapon:p.weapon,level:p.level });
+    firePrimary(this,this.player.x+.28,this.player.y);
+    if(this.player.echo)firePrimary(this,this.echoWing.x+.18,this.echoWing.y,true);
+    this.emit('shoot', { x:this.player.x,y:this.player.y,weapon:this.player.weapon,level:this.player.level });
   }
   releaseCharge() {
     const p = this.player; if (p.charge < .3) { p.charge = 0; return; }
@@ -170,11 +168,15 @@ export class Game {
     if(this.boss?.type==='gatekeeper')this.bossHold+=dt;const progress=this.time-this.bossHold;const act=progress<90?1:progress<132?2:3;
     if(act!==this.act&&!this.boss){this.act=act;this.shots=this.shots.filter(s=>!s.hostile);this.announce(act===2?'II / THE COPPER FOUNDRY':'III / HEART OF THE MACHINE',act===2?'Armored columns. Fracture their formation.':'The tide turns inward. Stay in the openings.');this.emit('act',{act});}
     for(const [at,name]of [[30,'LEVIATHAN'],[108,'THE PROCESSION'],[150,'THE HELIX']])if(progress>=at&&!this.boss&&!this.setpieces.has(at)){this.setpieces.add(at);this.emit('setpiece',{name,act:this.act});if(at===108)for(let i=0;i<4;i++)this.spawnEnemy('carrier',(i-1.5)*1.7,i);if(at===150)for(let i=0;i<6;i++)this.spawnEnemy('weaver',Math.sin(i*1.2)*3,i);}
-    const p = this.player; p.invincible = Math.max(0, p.invincible - dt); p.cooldown -= dt;
+    const p = this.player; p.invincible = Math.max(0, p.invincible - dt); p.cooldown -= dt;p.vectorCooldown-=dt;p.missileCooldown-=dt;
     let mx = input.x || 0, my = input.y || 0; const length = Math.hypot(mx, my); if (length > 1) { mx /= length; my /= length; }
     p.focus=!!(input.focus||input.charge);p.moveX=mx;p.moveY=my;
     const speed = p.focus ? 2.4 : 5.2;
     p.x = clamp(p.x + mx * speed * dt, -7.7, 7.6); p.y = clamp(p.y + my * speed * dt, -4.2, 4.2);
+    this.path.push({time:this.time,x:p.x,y:p.y,moveY:my});
+    while(this.path.length>1&&this.path[1].time<=this.time-.28)this.path.shift();
+    const past=this.path[0];this.echoWing={x:past.x-.5,y:past.y,moveY:past.moveY};
+    if (input.fire) fireModules(this);
     if (input.charge) p.charge = Math.min(1.4, p.charge + dt); else if (p.charge > 0) this.releaseCharge();
     if (input.fire && !input.charge && p.cooldown <= 0) this.shootPlayer();
     if (input.bomb && !this.bombWasDown) this.bomb(); this.bombWasDown = !!input.bomb;
@@ -188,7 +190,7 @@ export class Game {
     }
     if(!this.boss&&!this.bossSpawned&&window==='corridor'&&this.time>=this.nextCurtain){this.curtain(Math.sin(this.time*(this.act===3?.23:.18))*2.6,this.act===3?2.5:2.1);this.nextCurtain=this.time+1.7;}
     if (this.time >= this.nextPickup && !this.bossSpawned) {
-      this.drop(7.4, Math.sin(this.time * .12) * 2.3, ['SPREAD', 'SHIELD', 'LANCE', 'ECHO', 'BOMB'][this.pickupCycle++ % 5]); this.nextPickup += 15;
+      this.drop(6.6, Math.sin(this.time * .12) * 2.3, LOOT_ROUTE[this.pickupCycle++ % LOOT_ROUTE.length]); this.nextPickup += this.pickupCycle<6?10:15;
     }
     // Conductor: aimed fans, moving corridors, then one-emitter recovery beats.
     const emitterLimit=this.boss?0:window==='corridor'?0:window==='recovery'?1:this.time<24?2:this.time<95?3:4;
@@ -212,11 +214,16 @@ export class Game {
       if (e.entry <= 0 && Math.hypot(e.x - p.x, e.y - p.y) < e.r + p.r) this.hurtPlayer();
     }
     for (const s of this.shots) {
-      s.px = s.x; s.py = s.y; s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt;
+      s.px = s.x; s.py = s.y;s.previousRadius=s.r; s.age=(s.age||0)+dt;
+      if(s.kind==='missile')steerMissile(this,s,dt);
+      if(s.kind==='ring')s.r=Math.min(.38+s.level*.11,.12+s.age*.55);
+      s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt;
       if (s.hostile) { if (segmentHits(s.px, s.py, s.x, s.y, p.x, p.y, p.r + s.r)) { this.hurtPlayer(); s.life = 0; }
         else if(!s.grazed&&p.invincible<=0&&Math.hypot(s.x-p.x,s.y-p.y)<.34){s.grazed=true;this.grazes++;this.combo=Math.min(8,this.combo+.25);this.comboTime=4;this.score+=Math.round(10*this.combo);this.emit('graze',{x:p.x,y:p.y});}}
       else for (const e of this.enemies) {
-        if (!e.dead && e.entry <= 0 && segmentHits(s.px, s.py, s.x, s.y, e.x, e.y, e.r + s.r)) { this.damageEnemy(e, s.damage); s.life = 0; break; }
+        if (!e.dead && e.entry <= 0 && !s.hits?.includes(e.id) && (s.kind==='ring'?ringHits(s,e):segmentHits(s.px, s.py, s.x, s.y, e.x, e.y, e.r + s.r))) {
+          this.damageEnemy(e, s.damage);(s.hits||=[]).push(e.id);s.pierce=(s.pierce||1)-1;if(s.pierce<=0){s.life=0;break;}
+        }
       }
     }
     for (const item of this.pickups) {

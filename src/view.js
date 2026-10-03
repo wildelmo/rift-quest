@@ -3,7 +3,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Art } from './sculpt.js';
 import { KEYLINE, projectileStyle } from './contrast.js';
 const MINT = 0xb4ffe2, ORANGE = 0xff7545, DARK = 0x183b36, WHITE = 0xeaf5df;
-const colors = { SPREAD: 0xffc570, LANCE: 0x98dfff, ECHO: 0xd4a8ff, SHIELD: MINT, BOMB: ORANGE };
+const colors = { SPREAD: 0xffc570, LANCE: 0x98dfff, ECHO: 0xd4a8ff, SHIELD: MINT, BOMB: ORANGE, VECTOR: 0x81d7ff, MISSILE: 0x76ffd0, RING: 0xb7adff };
 export class View {
   constructor(container) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
@@ -43,6 +43,15 @@ export class View {
     // Put opaque threat marks in the transparent render queue so they draw after sparks/glow.
     for(const [mesh,order] of [[this.bulletOutline,31],[this.bullets,32],[this.bulletCore,33]]){Object.assign(mesh.material,{transparent:true,opacity:1,depthTest:false,depthWrite:false});mesh.renderOrder=order;}
     this.bulletHalos.material.opacity=.38;this.bulletHalos.renderOrder=30;this.bulletHalos.material.depthTest=false;
+    // Friendly weapon banks sit below hostile outlines, regardless of shot insertion order.
+    this.friendlyBank={};for(const [name,geo,color,order] of [['outline',this.geo.smooth,KEYLINE,20],['body',this.geo.smooth,0xffffff,21],['core',this.geo.smooth,0xd9fff4,22],['missileOutline',this.geo.cone,KEYLINE,20],['missileBody',this.geo.cone,0x19bf96,21],['missileCore',this.geo.cone,0xd9fff4,22],['ringOutline',new THREE.TorusGeometry(1,.10,6,64),KEYLINE,20],['ringBody',new THREE.TorusGeometry(1,.065,6,64),0x8272e9,21],['ringCore',new THREE.TorusGeometry(1,.016,4,64),0xe5fffa,22],['trail',this.geo.smooth,0x237b6c,19]]){
+      const mesh=new THREE.InstancedMesh(geo,new THREE.MeshBasicMaterial({color,transparent:true,opacity:1,depthTest:false,depthWrite:false,toneMapped:false}),name==='trail'?1800:240);mesh.frustumCulled=false;mesh.renderOrder=order;mesh.count=0;this.root.add(mesh);this.friendlyBank[name]=mesh;
+    }
+    this.vectorPods=new THREE.Group();this.missilePods=new THREE.Group();this.ship.add(this.vectorPods,this.missilePods);
+    for(const side of [-1,1]){
+      const mount=this.mesh('box',0x233347,false,[-.03,side*.26,.035],[.30,.085,.085]);this.vectorPods.add(mount);const tip=this.mesh('smooth',0x83deff,true,[.15,side*.30,.06],[.075,.035,.035]);this.vectorPods.add(tip);
+      const pod=this.mesh('box',0x283f3c,false,[-.35,side*.25,.025],[.24,.10,.09]);this.missilePods.add(pod);for(const offset of [-.025,.025])this.missilePods.add(this.mesh('smooth',0x90ffd9,true,[-.23,side*.25+offset,.075],[.04,.02,.015]));
+    }
     this.particleKeyline=new THREE.InstancedMesh(this.geo.oct,new THREE.MeshBasicMaterial({color:KEYLINE,toneMapped:false}),1800);this.particleKeyline.frustumCulled=false;this.root.add(this.particleKeyline);
     this.particleMesh = new THREE.InstancedMesh(this.geo.oct, new THREE.MeshBasicMaterial({ color: 0xffffff,toneMapped:false }), 1800); this.particleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.particleMesh.frustumCulled = false; this.root.add(this.particleMesh);
     this.emberMesh=new THREE.InstancedMesh(this.art.plane,new THREE.MeshBasicMaterial({map:this.art.glowTexture,color:0xffffff,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false}),1800);this.emberMesh.frustumCulled=false;this.root.add(this.emberMesh);
@@ -116,9 +125,9 @@ export class View {
       c.fillStyle='#a9c4b6';c.font='26px monospace';c.fillText('LEFT STICK ↑↓ SELECT / ←→ ADJUST',64,904);c.fillText('RIGHT TRIGGER CONFIRM · B RESUME · X RECENTER',64,952);
     });
     const p=game.player;this.message.position.y=paused||game.state!=='playing'?.4:4.05;this.message.scale.setScalar(paused||game.state!=='playing'?1:.60); this.hud.visible=xr; this.message.visible=xr && !paused && ( game.state==='lost' || (game.state==='won'&&!this.cinematics.some(c=>c.kind==='death')) || (game.state==='playing'&&!!message)); this.corners.visible=!xr || paused;
-    if (xr) this.paintPanel(this.hud,`${p.hp}/${p.shield}/${p.weapon}/${p.level}/${p.echo}/${game.bombs}/${game.score}/${Math.floor(p.charge*10)}`,c=>{
+    if (xr) this.paintPanel(this.hud,`${p.hp}/${p.shield}/${p.weapon}/${p.level}/${p.echo}/${p.vector}/${p.missiles}/${game.bombs}/${game.score}/${Math.floor(p.charge*10)}`,c=>{
       c.fillStyle='#101e19dd'; c.fillRect(0,30,1536,125); c.fillStyle='#ff956b'; c.font='bold 32px monospace'; c.fillText('RIFT / 01',30,78);
-      c.fillStyle='#edfae8'; c.font='26px monospace'; c.fillText(`HULL ${'◆'.repeat(Math.max(0,p.hp))}  SHIELD ${p.shield}`,30,123); c.fillText(`${p.weapon} ${p.level} ${p.echo?'+ ECHO':''}`,570,78); c.fillText(`BOMBS ${game.bombs}  CHARGE ${Math.floor(p.charge/1.4*100)}%   ×${game.combo.toFixed(1)}`,570,123); c.fillStyle='#b4ffe2'; c.font='bold 43px monospace'; c.fillText(String(game.score).padStart(6,'0'),1280,107);
+      c.fillStyle='#edfae8'; c.font='26px monospace'; c.fillText(`HULL ${'◆'.repeat(Math.max(0,p.hp))}  S${p.shield}  CHARGE ${Math.floor(p.charge/1.4*100)}%`,30,123); c.fillText(`${p.weapon} ${p.level} ${p.echo?'+ ECHO':''}`,570,78); c.fillText(`VECTOR ${p.vector} · MISSILE ${p.missiles} · BOMBS ${game.bombs}`,570,123); c.fillStyle='#b4ffe2'; c.font='bold 43px monospace'; c.fillText(String(game.score).padStart(6,'0'),1280,107);
     });
     const ended=game.state==='won'||game.state==='lost';
     const title=ended ? game.state==='won'?'CATHEDRAL DOWN':'SIGNAL LOST' : paused?'FLIGHT STANDBY':message?.title;
@@ -136,7 +145,7 @@ export class View {
   flash(x,y,color,size=.5,life=.16) {if(this.flashes.length>40)return;const obj=this.art.glow(color,size);obj.position.set(x,y,.22);this.root.add(obj);this.flashes.push({obj,size,age:0,life});}
   spark(x,y,color,count=6,strength=1) {for(let i=0;i<count;i++){if(this.particles.length>=1800)this.particles.shift();const angle=Math.random()*Math.PI*2,speed=(.6+Math.random()*3)*strength;this.particles.push({x,y,z:0,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,vz:(Math.random()-.5)*strength*1.7,life:.25+Math.random()*.65,age:0,color,size:.014+Math.random()*.026});}}
   burst(e) {const color=e.color==='orange'?ORANGE:0x7beaff;this.spark(e.x,e.y,color,Math.min(240,Math.round(e.size*100)),e.size);this.flash(e.x,e.y,0xffba78,e.size*2,.25);const obj=this.shock(color);obj.position.set(e.x,e.y,.1);this.root.add(obj);this.shockwaves.push({obj,age:0,life:.6,size:e.size});for(let i=0;i<Math.min(45,12*e.size);i++){if(this.fragments.length>=180)this.fragments.shift();const a=Math.random()*Math.PI*2;this.fragments.push({x:e.x,y:e.y,z:0,vx:Math.cos(a)*(1+Math.random())*e.size,vy:Math.sin(a)*(1+Math.random())*e.size,vz:(Math.random()-.3)*e.size*2,age:0,life:.7+Math.random(),size:(.025+Math.random()*.07)*Math.sqrt(e.size)});}}
-  event(e){if(e.type==='shoot')this.recoil=1;if(e.type==='enemyFire'&&e.y!==undefined)this.flash(e.x,e.y,0xff673f,.5,.11);
+  event(e){if(e.type==='shoot')this.recoil=1;if(e.type==='missile'){for(const side of [-1,1]){this.flash(e.x-.1,e.y+side*.18,0x80ffd8,.22,.10);this.spark(e.x-.1,e.y+side*.18,0x80ffd8,3,.20);}}if(e.type==='vector'){for(const side of [-1,1])this.flash(e.x+.1,e.y+side*.18,0x83dcff,.25,.06);}if(e.type==='enemyFire'&&e.y!==undefined)this.flash(e.x,e.y,0xff673f,.5,.11);
     if(e.type==='setpiece'){const obj=this.art.setpiece(e.name);obj.scale.setScalar(e.act===1?1.8:1.35);obj.position.set(15,e.act===3?-1.9:1.9,-4.5);obj.rotation.y=e.act===3?-.35:-.22;this.root.add(obj);this.cinematics.push({obj,kind:'flyby',name:e.name,age:0,life:16,speed:2.2});}
     if(e.type==='kill'&&e.boss){let obj;const rendered=this.objects.get(e.id);if(rendered){const data=rendered.userData;rendered.userData={};obj=rendered.clone(true);rendered.userData=data;}else obj=this.art.boss(e.archetype,e.r);obj.position.set(e.x,e.y,0);obj.userData.origin={x:e.x,y:e.y};obj.traverse(m=>{if(m.isMesh)m.userData.drift=(Math.random()-.5)*2;});this.root.add(obj);this.cinematics.push({obj,kind:'death',age:0,life:e.archetype==='cathedral'?4.4:2.6,next:.1});}
     if(e.type==='pickup'){this.flash(e.x,e.y,colors[e.kind],1.5,.35);this.spark(e.x,e.y,colors[e.kind],22,.7);}
@@ -148,7 +157,8 @@ export class View {
   update(game,dt,time){
     this.sceneTime+=dt;time=this.sceneTime;this.recoil=Math.max(0,this.recoil-dt*7);this.updateCinematics(dt,time);
     const p=game.player,xr=this.renderer.xr.isPresenting,shipScale=xr?.34:.8;this.ship.scale.setScalar(shipScale);this.ship.position.set(p.x-this.recoil*.05,p.y,0);this.ship.rotation.x=THREE.MathUtils.lerp(this.ship.rotation.x,(p.moveY||0)*-.42,Math.min(1,dt*14));this.ship.rotation.y=THREE.MathUtils.lerp(this.ship.rotation.y,(p.moveX||0)*.12,Math.min(1,dt*14));this.ship.rotation.z=THREE.MathUtils.lerp(this.ship.rotation.z,(p.moveY||0)*.11,Math.min(1,dt*14));this.ship.visible=p.hp>0;
-    this.echo.visible=p.echo&&p.hp>0;this.echo.scale.setScalar(xr?.21:.45);this.echo.position.set(p.x-.3,p.y+.45,0);this.echo.rotation.x=this.ship.rotation.x;
+    this.echo.visible=p.echo&&p.hp>0;this.echo.scale.setScalar(xr?.21:.45);this.echo.position.set(game.echoWing.x,game.echoWing.y,0);this.echo.rotation.x=THREE.MathUtils.lerp(this.echo.rotation.x,game.echoWing.moveY*-.42,Math.min(1,dt*14));
+    this.vectorPods.visible=p.vector>0;this.missilePods.visible=p.missiles>0;this.vectorPods.rotation.z=Math.sin(time*12)*.015*p.vector;
     this.hitbox.visible=this.playerBeaconOutline.visible=p.hp>0;this.hitbox.scale.set(p.focus?p.r:.035,p.focus?p.r:.035,.015);this.playerBeaconOutline.scale.set(p.focus?p.r+.025:.065,p.focus?p.r+.025:.065,.012);this.playerBeaconOutline.position.set(p.x,p.y,0);this.hitbox.material.color.setHex(p.invincible>0&&Math.floor(time*3)%2?0xffc165:0xd9fff4);this.hitboxRing.visible=!!p.focus&&p.hp>0;this.hitbox.position.set(p.x,p.y,0);this.hitboxRing.position.set(p.x,p.y,0);
     this.shield.visible=p.shield>0;this.shield.position.set(p.x,p.y,0);this.shield.rotation.y=Math.sin(time*2)*.3;this.shield.rotation.z=time*.6;
     this.charge.visible=p.charge>.1;this.charge.position.set(p.x+.3,p.y,0);this.charge.scale.setScalar(.025+p.charge*.08);
@@ -159,19 +169,28 @@ export class View {
       if(e.maxHp){const machine=g.getObjectByName('machinery');machine.rotation.z=e.type==='gatekeeper'?Math.sin(e.age*.6)*.06:e.age*.12;machine.rotation.y=Math.sin(e.age*.6)*.2;machine.scale.setScalar((1+(e.phase-1)*.12)*(e.entry>0?.35+.65*(1-Math.max(0,e.entry)/3):1));const turbine=machine.getObjectByName('turbine');if(turbine)turbine.rotation.z=-e.age*(.5+e.phase*.15);const iris=machine.getObjectByName('iris');if(iris){iris.rotation.z=e.age*-.32;iris.scale.setScalar(e.warning>0?.9+.15*Math.sin(time*22):1);}let petalIndex=0;for(const arm of machine.children.filter(c=>c.name==='petal')){arm.rotation.y=Math.sin(e.age*.8+arm.rotation.z)*.12+(e.phase-1)*.40;arm.position.z=-(e.phase-1)*.35;arm.visible=e.phase<3||petalIndex++%3!==0;}for(const claw of machine.children.filter(c=>c.name==='claw'))claw.rotation.z=claw.userData.side*(.04+Math.sin(e.age*1.4)*.12);const w=g.userData.warning,l=g.userData.laser;w.visible=e.warning>0;w.getObjectByName('warning-core').material.color.setHex(Math.floor(time*3)%2?0xffbd58:0xf17526);l.visible=e.laser>0;w.position.set((e.x-8)/2,e.laserY,0);l.position.copy(w.position);w.scale.x=l.scale.x=e.x+8;if(l.visible)l.getObjectByName('energy').material.uniforms.uTime.value=time;}
       else{const limbs=g.getObjectByName('limbs');if(limbs)for(const fin of limbs.children)fin.rotation.x=fin.userData.side*Math.sin(e.age*4+fin.userData.phase)*.35;g.rotation.x=Math.sin(e.age*2+e.phase)*.2;g.rotation.z=e.type==='weaver'?Math.sin(e.age*2)*.25:0;}
     });
-    this.bullets.count=this.bulletCore.count=this.bulletHalos.count=this.bulletOutline.count=game.shots.length;
-    game.shots.forEach((shot,i)=>{
-      const angle=Math.atan2(shot.vy,shot.vx),style=projectileStyle(shot);
-      this.dummy.rotation.set(0,0,angle);
-      for(const [mesh,z,length,width,color] of [
-        [this.bulletOutline,.0,style.length*1.18,style.width*1.3,null],
-        [this.bullets,.0,style.length,style.width,style.color],
-        [this.bulletCore,.0,style.length*.56,style.width*.34,style.core]]){
-        this.dummy.position.set(shot.x,shot.y,z);this.dummy.scale.set(length,width,shot.r*.3);this.dummy.updateMatrix();mesh.setMatrixAt(i,this.dummy.matrix);if(color!==null)mesh.setColorAt(i,this.color.setHex(color));
+    let hostileIndex=0;for(const mesh of Object.values(this.friendlyBank))mesh.count=0;
+    for(const shot of game.shots){
+      const angle=Math.atan2(shot.vy,shot.vx),style=projectileStyle(shot);this.dummy.rotation.set(0,0,angle);
+      if(!shot.hostile&&shot.kind==='ring'){
+        for(const [name,factor] of [['ringOutline',1],['ringBody',1],['ringCore',1]]){const mesh=this.friendlyBank[name],i=mesh.count++;this.dummy.position.set(shot.x,shot.y,0);this.dummy.rotation.z=shot.age*2;this.dummy.scale.set(shot.r*factor,shot.r*factor,.25);this.dummy.updateMatrix();mesh.setMatrixAt(i,this.dummy.matrix);}
+        continue;
       }
-      this.dummy.position.set(shot.x-(shot.hostile?0:Math.cos(angle)*.18),shot.y,.075);this.dummy.scale.set(shot.hostile?style.length*3:shot.kind==='lance'?1.7:.9,shot.r*3,1);this.dummy.updateMatrix();this.bulletHalos.setMatrixAt(i,this.dummy.matrix);this.bulletHalos.setColorAt(i,this.color.setHex(style.color));
-    });
-    for(const mesh of [this.bullets,this.bulletCore,this.bulletOutline,this.bulletHalos]){mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;}
+      if(!shot.hostile&&shot.kind==='missile'){
+        for(const [name,factor]of [['missileOutline',1.25],['missileBody',1],['missileCore',.48]]){const mesh=this.friendlyBank[name],i=mesh.count++;this.dummy.position.set(shot.x,shot.y,0);this.dummy.rotation.z=angle-Math.PI/2;this.dummy.scale.set(.065*factor,.19*factor,.045);this.dummy.updateMatrix();mesh.setMatrixAt(i,this.dummy.matrix);}
+        const trail=this.friendlyBank.trail;for(let n=1;n<shot.trail.length;n+=2){const point=shot.trail[n],previous=shot.trail[n-1];if(trail.count>=1800)break;this.dummy.position.set((point.x+previous.x)/2,(point.y+previous.y)/2,0);this.dummy.rotation.z=Math.atan2(point.y-previous.y,point.x-previous.x);this.dummy.scale.set(Math.hypot(point.x-previous.x,point.y-previous.y)*1.5,.016*point.life/.28,.008);this.dummy.updateMatrix();trail.setMatrixAt(trail.count++,this.dummy.matrix);}
+        continue;
+      }
+      const bank=shot.hostile?{outline:this.bulletOutline,body:this.bullets,core:this.bulletCore}:this.friendlyBank;
+      const i=shot.hostile?hostileIndex++:bank.body.count++;if(!shot.hostile)bank.outline.count=bank.core.count=bank.body.count;
+      this.dummy.rotation.z=angle;
+      for(const [mesh,length,width,color] of [[bank.outline,style.length*1.18,style.width*1.38,null],[bank.body,style.length,style.width,style.color],[bank.core,style.length*.65,style.width*.35,style.core]]){
+        this.dummy.position.set(shot.x,shot.y,0);this.dummy.scale.set(length,width,shot.r*.3);this.dummy.updateMatrix();mesh.setMatrixAt(i,this.dummy.matrix);if(color!==null)mesh.setColorAt(i,this.color.setHex(color));
+      }
+      if(shot.hostile){this.dummy.position.set(shot.x,shot.y,.075);this.dummy.scale.set(style.length*3,shot.r*3,1);this.dummy.updateMatrix();this.bulletHalos.setMatrixAt(i,this.dummy.matrix);this.bulletHalos.setColorAt(i,this.color.setHex(style.color));}
+    }
+    this.bullets.count=this.bulletCore.count=this.bulletHalos.count=this.bulletOutline.count=hostileIndex;
+    for(const mesh of [this.bullets,this.bulletCore,this.bulletOutline,this.bulletHalos,...Object.values(this.friendlyBank)]){mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;}
     this.sync(this.pickupObjects,game.pickups,item=>{const g=this.art.pickup(item.kind,colors[item.kind]);const label=this.textPanel(256,80,.72,.22);label.position.set(0,-.4,0);this.paintPanel(label,item.kind,c=>{c.fillStyle='#091320bb';c.fillRect(0,0,256,80);c.fillStyle='#edfbea';c.textAlign='center';c.font='bold 36px monospace';c.fillText(item.kind,128,54);});g.add(label);g.userData.label=label;this.root.add(g);return g;},(g,e)=>{g.position.set(e.x,e.y,0);g.getObjectByName('capsule').rotation.y=Math.sin(e.age*2)*.35;});
     this.sync(this.effectObjects,game.effects,e=>{const g=new THREE.Group();if(e.kind==='beam'){const energy=this.energy(0x66b7ff);energy.name='energy';g.add(energy);}else{const shock=this.shock(0x73dfff);shock.name='shock';g.add(shock);g.add(this.art.glow(0x46a7ff,1.5));}this.root.add(g);return g;},(g,e)=>{const f=1-e.age/e.life;if(e.kind==='beam'){g.position.set((e.x+8)/2,e.y,0);g.scale.set(8-e.x,(.9+e.strength)*f,1);g.getObjectByName('energy').material.uniforms.uTime.value=time;}else{g.position.set(e.x,e.y,e.age*.5);g.scale.setScalar(.1+e.age*21);g.getObjectByName('shock').material.uniforms.uFade.value=f;}});
     this.particles=this.particles.filter(p=>p.age<p.life).slice(-1800);this.particleMesh.count=this.emberMesh.count=this.particleKeyline.count=this.particles.length;

@@ -1,7 +1,7 @@
 import { makeBank } from './sound-bank.js';
 // Layered procedural effects and an adaptive industrial soundtrack; no audio downloads.
 export class Sound {
-  constructor(){this.enabled=true;this.volume=1;this.musicVolume=1;this.desiredRunning=false;this.revision=0;this.sources=new Set();this.step=0;this.nextBeat=0;this.lastShot=0;this.lastImpact=0;this.lastEnemy=0;this.voices=0;this.sampleVoices=[];}
+  constructor(){this.enabled=true;this.volume=1;this.musicVolume=1;this.desiredRunning=false;this.revision=0;this.sources=new Set();this.step=0;this.nextBeat=0;this.lastShot=0;this.lastImpact=0;this.lastEnemy=0;this.lastVector=0;this.voices=0;this.sampleVoices=[];}
   async start(){
     this.desiredRunning=true;const revision=this.revision;
     if(this.closing)await this.closing;
@@ -65,7 +65,10 @@ export class Sound {
   sample(name,volume=.25,pan=0,rate=1){if(!this.ctx||!this.enabled||!this.desiredRunning||this.ctx.state!=='running')return;const c=this.ctx;const same=this.sampleVoices.filter(v=>v.name===name),limit=name==='explosion'?4:name==='collapse'?1:8;if(same.length>=limit){const old=same[0];old.gain.gain.setTargetAtTime(.0001,c.currentTime,.008);old.source.stop(c.currentTime+.04);this.sampleVoices=this.sampleVoices.filter(v=>v!==old);}const source=c.createBufferSource(),gain=c.createGain(),p=c.createStereoPanner();source.buffer=this.bank[name];source.playbackRate.value=rate;gain.gain.value=volume;p.pan.value=Math.max(-.8,Math.min(.8,pan));source.connect(gain).connect(p).connect(this.sfx);const voice={name,source,gain};this.sampleVoices.push(voice);this.sources.add(source);source.start();source.onended=()=>{this.sources.delete(source);this.sampleVoices=this.sampleVoices.filter(v=>v!==voice);source.disconnect();gain.disconnect();p.disconnect();};}
   event(e){
     if(!this.ctx||!this.enabled||!this.desiredRunning||this.ctx.state!=='running')return;this.bus=this.sfx;this.scheduleDelay=0;const t=this.ctx.currentTime,pan=(e.x||0)/9;
-    if(e.type==='shoot'&&t-this.lastShot>.06){this.lastShot=t;this.sample(e.weapon==='LANCE'?'lance':e.weapon==='SPREAD'?'spread':'pulse',e.weapon==='LANCE'?.25:.19,pan,1+((e.level||1)-1)*.06);}
+    if(e.type==='missile'){this.noise(.13,.05,2300,pan,'bandpass');this.tone(420,.12,'triangle',.04,155,pan,1800);}
+    if(e.type==='vector'&&t-(this.lastVector||0)>.15){this.lastVector=t;this.tone(1100,.055,'triangle',.024,540,pan,2600);}
+    if(e.type==='shoot'&&e.weapon==='RING'&&t-this.lastShot>.10){this.lastShot=t;this.tone(620,.22,'sine',.13,270,pan,3600);this.tone(930,.15,'triangle',.035,410,pan,2600);this.noise(.05,.035,4200,pan,'bandpass');}
+    else if(e.type==='shoot'&&t-this.lastShot>.06){this.lastShot=t;this.sample(e.weapon==='LANCE'?'lance':e.weapon==='SPREAD'?'spread':'pulse',e.weapon==='LANCE'?.25:.19,pan,1+((e.level||1)-1)*.06);}
     if(e.type==='impact'&&t-this.lastImpact>.07){this.lastImpact=t;this.sample('impact',e.boss?.13:.18,pan,1+Math.random()*.15);}
     if(e.type==='enemyFire'&&t-this.lastEnemy>.22){this.lastEnemy=t;this.tone(e.heavy?85:260,.14,'sawtooth',.075,e.heavy?48:90,pan,1400);this.noise(.07,.055,1100,pan,'bandpass');}
     if(e.type==='kill'){this.sample(e.boss?'collapse':'explosion',e.boss?.8:.37,pan,.92+Math.random()*.16);if(e.boss)this.duckUntil=t+2;}

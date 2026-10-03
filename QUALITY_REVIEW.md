@@ -44,3 +44,19 @@ The 9.0 assessment above applies to the preceding art/combat revision; it is not
 ## Subsequent passthrough visibility update
 
 Added opaque shaded projectile bodies, graphite edges, warm/mint cores, dual hull contours, a persistent player beacon, and solid beam/warning borders. Decorative sparks no longer overdraw critical projectile marks. No simulation rules, room backdrop, or background processing were added. All 24 simulation/menu checks and browser render/lifecycle checks pass. The new contrast suite checks four room-color fixtures, minimum width at maximum distance, oblique views, shader compilation, and a visible hostile core through 182 burst particles. The staged busy scene had 92 hostile shots and 212 draw calls; a separate desktop render probe had 280 calls and 323,174 triangles. These are scene samples, not measured Quest frame rates. This pass has no new independent numerical grade; real Quest visibility and performance remain unverified.
+
+## Arsenal upgrade review — October 3, 2026
+
+**Fresh independent assessment: 9.0/10, provisional, for the verified web arsenal upgrade.** The reviewer found no blocking software defect. This grade applies to the implemented power-up revision, with the headset limitations below.
+
+The reviewer independently checked source, eight pickup icons, pale and busy background captures, and four sequential motion frames. VECTOR provides wide upper/lower diagonal fire. MISSILE launches restrained paired seekers with bounded turning and target reacquisition. RING expands as a hollow annulus and pierces formations; LANCE gains a longer core, rails, damage, and penetration. Echo reproduces the earlier flight path and fires from its own delayed position. Offensive modules stack across primary switches, and primary upgrade levels persist.
+
+- All 32 simulation/menu tests, the production build, and all 10 browser lifecycle scenarios passed independently.
+- Maximum-loadout tracking probes exposed all three phases of each boss. Strongest Lance took 13.48 seconds for Gatekeeper and 29.89 seconds for Cathedral, with 7 and 13 attack events. Ring took 20.23 and 46.47 seconds, with 10 and 20 attacks. These measurement probes use invulnerability and do not establish human difficulty.
+- Actual transparent-renderer fixtures showed readable hostile fire over rings and burst effects. A probe core remained opaque [255, 241, 207, 255], with friendly layers drawing before hostile layers. The shipped scene keeps a null background and zero-alpha clear.
+- Staged upgraded scenes sampled 152–159 draw calls and 202,560–233,318 triangles. A separate ordinary-combat sample reached 304 calls / 330,428 triangles. These are desktop scene samples, not headset frame rates or universal upper bounds.
+- The updated 15.96-second busy audio capture includes ring, vector, and missile effects alongside upgraded fire, impacts, multikills, beam warnings/fire, bomb, collapse, and victory. Peak 0.6126, RMS 0.0697, zero clipped samples at 48 kHz, and zero page errors. The reviewer checked recorded statistics and did not listen.
+
+No physical Quest playtest, measured headset frame rate, real passthrough lighting assessment, subjective audio review, or complete human playthrough was performed. The 9.0 score assesses this web upgrade; it does not certify a finished commercial Quest release.
+
+Reproducible local checks: npm test, npm run build, tests/arsenal-render-check.cjs, tests/contrast-check.cjs, tests/lifecycle-check.cjs, tests/render-check.cjs, and tests/audio-check.cjs. Browser checks use an isolated Playwright/Chrome session; QA background fixtures and development controls are not shipped gameplay.

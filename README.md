@@ -52,15 +52,15 @@ The clawed **Gatekeeper** arrives at 66 seconds. Its later phases fire coordinat
 
 The **Cathedral** arrives after 180 seconds of level progression. Its phases change from Needle Choir / Bloom attacks, to concentric Orrery rings, to isolated Last Opening corridors alternating with the Heartbreaker beam. Beam warnings last 1.5 seconds. Armor opens and sheds petals; destruction preserves that damaged pose, separates the machinery, and finishes before results appear.
 
-Five power-ups: **Spread**, **Lance**, **Echo**, **Shield**, and **Bomb**. Duplicate weapons upgrade to level 3. Spread gains damage, cadence, and a seven-shot formation. Lance gains damage and parallel rails. Echo adds a second firing drone; shields absorb damage and repair one hull point. Nearby pickups magnetize. Grazing builds a visible temporary score multiplier; damage resets it. The browser stores the best score and flight settings locally.
+Eight pickups build a layered arsenal. **Vector** adds independent diagonal guns above and below the ship; three upgrades widen coverage and add branches. **Missile** continuously launches pairs of low-damage seekers while the trigger is held. They choose the nearest eligible target, turn gradually, and reacquire destroyed targets. **Ring** replaces the primary with growing hollow waves that damage through their rim and pierce several enemies. **Spread** is a wide fan with a seven-shot top tier. **Lance** gains a longer ion core, twin rails, and limited penetration. Primary upgrade levels persist when switching weapons. **Echo** replays your flight path with a 0.28-second delay and fires from its own position at reduced damage. Vector and Missile stack with every primary and Echo. **Shield** absorbs hits and repairs one hull point; **Bomb** adds a screen-clearing pulse. Nearby pickups magnetize; timed drops introduce every family before the final boss, and carriers drop additional upgrades. Grazing builds a temporary score multiplier; damage resets it. The browser stores the best score and flight settings locally.
 
 ## Visibility in bright rooms
 
 Passthrough visibility is the default visual treatment. Projectiles have an opaque graphite keyline, a shaded saturated body, and a small warm or mint core. Warm coral/amber/magenta marks hostile fire; cool cyan/teal/violet marks player fire. Orb, petal, and needle proportions also distinguish patterns. Glow supports these solid marks instead of carrying their visibility. All core/body/keyline centers remain on the collision plane, including under oblique head views.
 
-Small ships have cached dark and light hull contours. The player ship stays visible throughout damage protection, with a steady outlined center beacon; a slow amber pulse indicates protection. Precision focus still displays the actual hitbox. Sparks have small dark edges and beams/warnings have solid contrast borders. Projectile marks draw after decorative transparency so explosion glow cannot erase them. Collision sizes and difficulty rules are unchanged.
+Small ships have cached dark and light hull contours. The player ship stays visible throughout damage protection, with a steady outlined center beacon; a slow amber pulse indicates protection. Precision focus still displays the actual hitbox. Sparks have small dark edges and beams/warnings have solid contrast borders. Projectile marks draw after decorative transparency so explosion glow cannot erase them. Hostile collision sizes and difficulty rules are unchanged. Friendly weapon marks draw below hostile outlines, so stacked fire cannot cover incoming threats.
 
-No room-sized dark panel, skybox, room texture, passthrough sampling, or full-screen effect is introduced. Two extra instanced batches handle projectile cores and spark outlines; two cached contour meshes are added per small hull. Physical Quest performance remains to be measured.
+No room-sized dark panel, skybox, room texture, passthrough sampling, or full-screen effect is introduced. Shared instanced batches handle bullets, hollow rings, missile hulls and trails, and spark outlines; two cached contour meshes are added per small hull. Physical Quest performance remains to be measured.
 
 The QA-only tests/contrast-check.cjs composites the actual transparent renderer against pale, warm, dark, and busy patterned fixtures. It checks opaque colored bodies/keylines, shader compilation, a narrow arena at 8 feet, oblique views, and a threat core inside a dense burst. These are desktop visual checks, not a substitute for real headset lighting/readability validation. Design references: [Meta color guidance](https://developers.meta.com/vr/design/styles_color/) and [mixed reality considerations](https://developers.meta.com/vr/design/mr-design-guideline/).
 
@@ -82,6 +82,7 @@ The main branch deploys through .github/workflows/deploy.yml. Pages Source is Gi
 
 ## Architecture
 
+- src/arsenal.js: stackable modules, primary weapons, bounded homing, annular collision, and pickup descriptions.
 - src/game.js: seeded 90 Hz simulation, swept collision, conductor, weapons, power-ups, bosses, and outcomes.
 - src/art.js: shared geometry, merging, plate, and glow helpers.
 - src/sculpt.js: compound models, material maps, articulated machinery, and bespoke set pieces.
@@ -89,7 +90,7 @@ The main branch deploys through .github/workflows/deploy.yml. Pages Source is Gi
 - src/main.js: desktop/XR lifecycle, controllers, room fit, pause, fixed simulation, and accessible menus.
 - src/audio.js / src/sound-bank.js: PCM effects, adaptive music, scheduling, voice management, ducking, and mixing.
 - src/menu.js: validated saved settings and controller-operated pause menu.
-- tests/game.test.js / tests/menu.test.js: 24 checks covering collision, progression, power-ups, budgets, phase isolation/recovery, act deferral, and deterministic stress.
+- tests/game.test.js / tests/menu.test.js / tests/arsenal.test.js: 32 checks covering collision, progression, power-ups, budgets, phase isolation/recovery, act deferral, and deterministic stress.
 - tests/render-check.cjs / tests/audio-check.cjs / tests/showcase-check.cjs: optional isolated Chrome scene, busy mix, composited motion, and lifecycle verification. Use Playwright through NODE_PATH; scene/audio checks accept RIFT_BROWSER.
 
 The optional tests/lifecycle-check.cjs checks pause/audio suspension, saved settings, difficulty, hangar/reentry, hidden-page rendering, complete shutdown, blocked/allowed tab closure, simulated XR controller and session events, failure cleanup, and audio-resume races. Its fake XR transport is not a physical headset test.
@@ -98,7 +99,9 @@ The optional tests/lifecycle-check.cjs checks pause/audio suspension, saved sett
 
 Desktop captures, motion, pause/restart, combat tests, and production build were verified. The independent reviewer checked every act and set piece across three progression seeds, then tested all six boss phases for 30 seconds from three starting heights with reactive movement, without firing, bombs, or artificial invulnerability. All 18 phase probes survived. Automated probes establish routes and transitions; they do not establish human difficulty ratings.
 
-The busy 15.96-second audio audition includes upgraded weapons, multikills, warning/fire, bomb, collapse, and victory. It measured peak 0.678, RMS 0.062, and zero clipped samples. Subjective listening remains unverified. See QUALITY_REVIEW.md for the independent assessment.
+The refreshed arsenal review scored 9.0/10 provisionally. All 32 tests and the browser lifecycle/contrast checks pass. Upgraded shots remain distinct over pale and busy fixtures; sequential frames verify curved seekers and delayed Echo movement. Maximum-loadout tracking probes still expose all boss phases, with the strongest Lance taking about 13.5 seconds for Gatekeeper and 29.9 seconds for Cathedral. These use invulnerability for measurement and do not establish human difficulty.
+
+The updated 15.96-second audio audition includes Ring, Vector, and Missile effects, upgraded fire, multikills, warning/fire, bomb, collapse, and victory. It measured peak 0.613, RMS 0.070, and zero clipped samples. Subjective listening remains unverified. See QUALITY_REVIEW.md for the independent assessment.
 
 **Physical Quest 3 passthrough, controller mapping, readability, comfort, and sustained frame rate need on-device validation.** Check room visibility, anchoring under head motion, controller mapping, tracking-loss pause, session reentry, and worst-phase frame time before calling this headset-validated.
 

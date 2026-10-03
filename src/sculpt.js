@@ -130,10 +130,14 @@ export class Art extends BaseArt {
     this.models.set(key,g);return g.clone(true);
   }
   pickup(kind,color){
+    const key='pickup-'+kind;if(this.models.has(key))return this.models.get(key).clone(true);
     const g=new THREE.Group(),body=new THREE.Group();g.add(body);
     this.part(body,this.sphere,C.ink,[0,0,0],[.19,.19,.1]);this.ring(body,.21,.025,C.edge);this.ring(body,.245,.007,color,.02,true);
     const icons={SPREAD:[[0,0],[.075,.07],[.075,-.07]],LANCE:[[-.07,0],[0,0],[.07,0]],ECHO:[[-.05,-.05],[.05,.05]],SHIELD:[[0,.07],[-.06,0],[.06,0],[0,-.07]],BOMB:[[0,0]]};
-    for(const [x,y]of icons[kind])this.part(body,kind==='LANCE'?this.box:this.sphere,color,[x,y,.105],kind==='LANCE'?[.065,.025,.015]:[.027,.027,.015],[0,0,0],true);
-    this.merge(body);body.name='capsule';const halo=this.glow(color,.75);halo.position.z=-.05;g.add(halo);return g;
+    for(const [x,y]of (icons[kind]||[]))this.part(body,kind==='LANCE'?this.box:this.sphere,color,[x,y,.105],kind==='LANCE'?[.065,.025,.015]:[.027,.027,.015],[0,0,0],true);
+    if(kind==='RING'){this.ring(body,.105,.015,color,.12,true);this.ring(body,.065,.007,C.white,.13,true);}
+    if(kind==='VECTOR')for(const side of [-1,1]){this.part(body,this.box,color,[.018,side*.045,.12],[.15,.025,.02],[0,0,side*.62],true);this.part(body,this.sphere,color,[.09,side*.1,.12],[.032,.028,.02],[0,0,0],true);}
+    if(kind==='MISSILE')for(const side of [-1,1]){this.part(body,this.box,color,[0,side*.053,.12],[.15,.034,.02],[0,0,0],true);this.part(body,this.sphere,C.white,[.08,side*.053,.12],[.032,.023,.02],[0,0,0],true);}
+    this.merge(body);body.name='capsule';const halo=this.glow(color,.75);halo.position.z=-.05;g.add(halo);this.models.set(key,g);return g.clone(true);
   }
 }
