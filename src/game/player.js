@@ -9,9 +9,8 @@ import { COLORS } from './fx.js';
 export const SHIP = {
   hitRadius: 0.0055,
   grazeRadius: 0.03,
-  fireRate: 14,
+  fireRate: 16,
   boltSpeed: 5.2,
-  chargeTime: 1.1,
   maxOptions: 3,
   maxLevel: 4,
   optionSpacing: 12, // history samples (5 mm each) between options
@@ -280,16 +279,12 @@ export class Ship {
     this.invuln = 0;
     this.dead = false;
     this.deadTimer = 0;
-    this.charge = 0;
-    this.charging = false;
-    this.triggerHeld = 0;
     this.fireTimer = 0;
     this.missileTimer = 0;
     this.held = false;
     this.history.length = 0;
     this.time = 0;
     if (this.trails) for (const t of this.trails) t.clear();
-    if (this.chargeSound) { this.chargeSound.stop(); this.chargeSound = null; }
   }
 
   get vulnerable() {
@@ -353,37 +348,10 @@ export class Ship {
     this.group.visible = !(this.invuln > 0 && Math.floor(this.time * 18) % 2 === 0);
     this._recordHistory();
 
-    // ----- charge shot (R-Type style): hold trigger to charge, release to fire
-    const firing = ctx.firing && this.held;
-    if (input.trigger && firing) {
-      this.triggerHeld += dt;
-      if (this.triggerHeld > 0.12) {
-        if (!this.charging) {
-          this.charging = true;
-          this.chargeSound = this.sfx.chargeTone();
-        }
-        this.charge = Math.min(1, this.charge + dt / SHIP.chargeTime);
-        this.chargeSound && this.chargeSound.set(this.charge);
-        const nose = this.nosePoint(_v);
-        if (Math.random() < 0.4 + this.charge) this.fx.inward(nose, 0.02 + this.charge * 0.035, COLORS.cyan);
-        const full = this.charge >= 1;
-        const flick = full ? 0.85 + 0.15 * Math.sin(this.time * 70) : 1;
-        this.fx.spawn({ x: nose.x, y: nose.y, z: nose.z, life: 0.03, size: (0.008 + 0.03 * this.charge) * flick, color: full ? COLORS.white : COLORS.cyan, shape: SHAPE.GLOW, additive: 0.55, alpha: 0.95 });
-        this.fx.spawn({ x: nose.x, y: nose.y, z: nose.z, life: 0.03, size: 0.004 + 0.012 * this.charge, color: COLORS.white, shape: SHAPE.BOLT, additive: 0.2 });
-        ctx.haptic && ctx.haptic(0.05 + this.charge * 0.25, 20);
-      }
-    } else {
-      if (this.charging) {
-        if (this.charge > 0.28) this._fireWave(ctx);
-        this.charging = false;
-        this.charge = 0;
-        if (this.chargeSound) { this.chargeSound.stop(); this.chargeSound = null; }
-      }
-      this.triggerHeld = 0;
-    }
-
-    // ----- auto-fire
-    if (firing && !this.charging) {
+    // ----- hold the trigger to fire a continuous stream
+    const firing = ctx.firing && this.held && input.trigger;
+    this.firingNow = firing;
+    if (firing) {
       this.fireTimer -= dt;
       while (this.fireTimer <= 0) {
         this.fireTimer += 1 / SHIP.fireRate;
@@ -396,7 +364,10 @@ export class Ship {
           this._missiles();
         }
       }
-    } else this.fireTimer = Math.max(this.fireTimer, 0);
+    } else {
+      // the first shot of a new burst leaves immediately
+      this.fireTimer = 0;
+    }
 
     // ----- options follow the ship's path (Gradius multiples)
     for (let i = 0; i < SHIP.maxOptions; i++) {
@@ -477,7 +448,14 @@ export class Ship {
       const od = ctx.aimAssist ? ctx.aimAssist(p, fwd) : fwd;
       this.shots.spawn({ x: p.x, y: p.y, z: p.z, vx: od.x * SHIP.boltSpeed, vy: od.y * SHIP.boltSpeed, vz: od.z * SHIP.boltSpeed, dmg: 0.75, size: 0.006, color: COLORS.amber });
     }
-    if (Math.random() < 0.5) this.sfx.play('shot', null, { vol: 0.35, minGap: 0.06 });
+    // muzzle flashes at both cannons + a light recoil tick in the hand
+    for (const sx of [-1, 1]) {
+      _v.set(0.011 * sx, -0.007, -0.062).applyQuaternion(this.quat).add(this.pos);
+      this.fx.spawn({ x: _v.x, y: _v.y, z: _v.z, life: 0.05, size: 0.022, size1: 0.008, color: COLORS.white, color1: COLORS.cyan, shape: SHAPE.STAR, additive: 0.85, rot: Math.random() * 3 });
+    }
+    this.volleys = (this.volleys || 0) + 1;
+    this.sfx.play('shot', null, { vol: 0.32, minGap: 0.055 });
+    if (this.volleys % 2 === 0) ctx.haptic && ctx.haptic(0.12, 12);
   }
 
   _missiles() {
@@ -486,23 +464,6 @@ export class Ship {
       _v2.set(sx * 0.6, 0.3, -1).normalize().applyQuaternion(this.quat).multiplyScalar(0.9);
       this.shots.spawn({ x: _v.x, y: _v.y, z: _v.z, vx: _v2.x, vy: _v2.y, vz: _v2.z, dmg: 2.2, kind: 'missile', life: 2.2, radius: 0.008 });
     }
-  }
-
-  _fireWave(ctx) {
-    const c = this.charge;
-    const nose = this.nosePoint(_v);
-    const dir = ctx.aimAssist ? ctx.aimAssist(this.pos, this.forward) : this.forward;
-    const sp = 3.0;
-    const radius = 0.014 + 0.03 * c;
-    this.shots.spawn({
-      x: nose.x, y: nose.y, z: nose.z, vx: dir.x * sp, vy: dir.y * sp, vz: dir.z * sp,
-      dmg: 6 + 44 * Math.pow(c, 1.6), radius, kind: 'wave', pierce: true, life: 2, charge: c,
-    });
-    this.fx.flash(nose, 0.05 + 0.08 * c, COLORS.cyan, 0.15);
-    this.fx.ring(nose, 0.08 + 0.12 * c, COLORS.cyan, 0.3);
-    this.sfx.play('wave', null, { vol: 0.5 + c * 0.6, rate: 1.3 - c * 0.35 });
-    ctx.haptic && ctx.haptic(0.4 + 0.6 * c, 80 + 120 * c);
-    ctx.onWaveFire && ctx.onWaveFire(c);
   }
 
   /** Power-ups */
@@ -525,9 +486,6 @@ export class Ship {
     this.level = Math.max(1, this.level - 1);
     this.optionCount = Math.max(0, this.optionCount - 1);
     this.shield = false;
-    this.charging = false;
-    this.charge = 0;
-    if (this.chargeSound) { this.chargeSound.stop(); this.chargeSound = null; }
   }
 
   respawn() {
@@ -542,7 +500,4 @@ export class Ship {
     if (!v) for (const m of this.optionModels) m.visible = false;
   }
 
-  get chargeLevel() {
-    return clamp(this.charge, 0, 1);
-  }
 }

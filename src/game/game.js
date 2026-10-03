@@ -11,6 +11,7 @@ import { Hud, fmt } from './hud.js';
 import { stage, WAVES } from './stage.js';
 import { PALETTE } from './models.js';
 import { Screens } from './screens.js';
+import { Menu } from './menu.js';
 
 // The game: state machine, collision resolution, scoring and feedback (sound, haptics,
 // hit-stop, flashes). Everything gameplay-related lives in arena-local space.
@@ -57,6 +58,10 @@ export class Game {
     this.boss = null;
     this.hud = new Hud(this);
     this.screens = new Screens(room);
+    this.menu = new Menu(this);
+    this.menuKey = '';
+    this.muted = false;
+    try { this.muted = localStorage.getItem('rift.muted') === '1'; } catch { /* storage unavailable */ }
     room.onLayout = () => this.screens.layout();
     this.headWorld = new THREE.Vector3(0, 1.6, 0);
     this.headLocal = new THREE.Vector3(0, 0.28, 0.4);
@@ -129,7 +134,6 @@ export class Game {
     this.waveLabel = '';
     this.screens.setOn(0);
     this.room.dimTarget = 0.15;
-    this.music.ctx && this.music.play('stage', 'title');
   }
 
   _resetWorld() {
@@ -200,8 +204,9 @@ export class Game {
     this.music.arrange(w.id >= 3 ? 'waveLead' : 'wave');
     if (w.id === 1) {
       this.scheduler.start((function* (g) {
-        yield 7;
-        g._hintOnce('charge', 'HOLD TRIGGER: CHARGE BLAST', 4);
+        yield 0.5;
+        g._hintOnce('fire', 'HOLD TRIGGER TO FIRE', 4);
+        yield 6.5;
         yield 14;
         g._hintOnce('bomb', 'A / X: SINGULARITY BOMB', 4);
       })(this));
@@ -327,7 +332,7 @@ export class Game {
     if (newHigh) { this.hiScore = Math.floor(this.score); saveHi(this.hiScore); }
     const secs = Math.round(this.time - this.stats.started);
     this.hud.showPanel('results', {
-      score: this.score, newHigh, prompt: 'PULL THE TRIGGER TO PLAY AGAIN',
+      score: this.score, newHigh, prompt: 'POINT AT THE MENU AND PULL THE TRIGGER',
       rows: [
         ['TIME', `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`],
         ['BEST CHAIN', `${this.maxChain} kills  ·  ×${chainMultiplier(this.maxChain)}`],
@@ -355,7 +360,7 @@ export class Game {
     this.continueFrom = atBoss ? WAVES.length : this.waveIndex;
     this.hud.showPanel('gameover', {
       score: this.score, newHigh,
-      prompt: `PULL THE TRIGGER TO CONTINUE FROM ${atBoss ? 'THE GYRE' : `WAVE ${this.waveIndex + 1}`}`,
+      prompt: 'POINT AT THE MENU AND PULL THE TRIGGER',
       rows: [
         ['REACHED', atBoss ? 'THE GYRE' : `WAVE ${this.waveIndex + 1}`],
         ['BEST CHAIN', `${this.maxChain} kills`],
@@ -614,6 +619,7 @@ export class Game {
     this.room.headLocal.copy(this.headLocal);
 
     this._handleHands(realDt, frame);
+    this._syncMenu();
 
     // time scaling: pause, hit-stop, slow motion
     const paused = this.state === 'paused';
@@ -772,27 +778,26 @@ export class Game {
     const hands = frame.hands || {};
     const ship = this.ship;
 
+    // --- the pointable menu (pause / title / end screens) takes the trigger while it is open
+    if (this.menu.visible) {
+      const pointers = [];
+      for (const [name, h] of Object.entries(hands)) {
+        if (h && h.ray && h.ray.position && h.tracked !== false) pointers.push({ hand: name, origin: h.ray.position, quaternion: h.ray.quaternion, select: h.edges.trigger });
+      }
+      if (frame.pointer) pointers.push(frame.pointer);
+      if (this.menu.update(realDt, pointers)) return;
+    }
+
     // --- buttons that work anywhere
     for (const [name, h] of Object.entries(hands)) {
       if (!h || !h.edges) continue;
-      if (h.edges.stick && (this.state === 'paused' || this.state === 'title' || this.state === 'victory' || this.state === 'gameover')) {
-        this.recenter(frame.head);
+      if (h.edges.stick && this.state !== 'playing') this.recenter(frame.head);
+      if (h.edges.b) {
+        // B / Y opens and closes the menu
+        if (this.state === 'playing') { this._pause(); return; }
+        if (this.state === 'paused' && this.heldHand) { this._resume(); return; }
       }
-      if (this.state === 'paused' && h.edges.b) {
-        this.sfx.volume = this.sfx.volume > 0 ? 0 : 1;
-        this.music.bus && this.music.bus.gain.setTargetAtTime(this.sfx.volume ? 0.55 : 0, this.music.ctx.currentTime, 0.1);
-        this.sfx.play('ui', null, { vol: 1 });
-      }
-      if (this.state === 'playing' && this.heldHand) {
-        const isHolder = name === this.heldHand;
-        if (h.edges.a || h.edges.b || (!isHolder && h.edges.trigger)) this.useBomb();
-      }
-      if ((this.state === 'victory' || this.state === 'gameover') && this.restReady && (h.edges.trigger || h.edges.squeeze)) {
-        if (!this.heldHand) this._grab(name);
-        if (this.state === 'victory') this.startGame(0);
-        else { this.continues++; this.score = 0; this.startGame(this.continueFrom, true); }
-        return;
-      }
+      if (this.state === 'playing' && this.heldHand && h.edges.a) this.useBomb();
     }
 
     // --- holding
@@ -854,9 +859,7 @@ export class Game {
     if (this.state === 'title') {
       this.startGame(Math.max(0, this.options.wave || 0));
     } else if (this.state === 'paused') {
-      this.state = 'playing';
-      this.ship.invuln = Math.max(this.ship.invuln, 0.8);
-      this.hud.hidePanel();
+      this._resume();
     }
   }
 
@@ -865,10 +868,77 @@ export class Game {
     this.heldHand = null;
     this.ship.held = false;
     this.sfx.play('release', null, { vol: 0.7 });
-    if (this.state === 'playing') {
-      this.state = 'paused';
-      this.hud.showPanel('pause');
+    if (this.state === 'playing') this._pause();
+  }
+
+  _pause() {
+    this.state = 'paused';
+    this.sfx.play('release', null, { vol: 0.6 });
+  }
+
+  _resume() {
+    this.state = 'playing';
+    this.ship.invuln = Math.max(this.ship.invuln, 0.8);
+    this.menu.hide();
+    this.menuKey = '';
+  }
+
+  /** Put the ship in the given hand without the title/pause side effects of _grab. */
+  _attach(hand) {
+    if (hand === 'mouse') hand = 'right';
+    if (!this.heldHand) {
+      this.heldHand = hand;
+      this.ship.held = true;
+      this.snap = 0.08;
+      this.snapFrom = this.ship.pos.clone();
     }
+    this.input.requestHold && this.input.requestHold();
+  }
+
+  toggleMute() {
+    this.muted = !this.muted;
+    try { localStorage.setItem('rift.muted', this.muted ? '1' : '0'); } catch { /* storage unavailable */ }
+    this.applyMute();
+    this.menuKey = '';
+  }
+
+  applyMute() {
+    this.sfx.volume = this.muted ? 0 : 1;
+    if (this.music.bus) this.music.bus.gain.setTargetAtTime(this.muted ? 0 : 0.55, this.music.ctx.currentTime, 0.1);
+  }
+
+  _menuSpec() {
+    const sound = { label: this.muted ? 'SOUND: OFF' : 'SOUND: ON', action: () => this.toggleMute() };
+    const exit = { label: 'EXIT GAME', danger: true, action: () => this.onExit && this.onExit() };
+    if (this.state === 'paused') {
+      return ['PAUSED', [
+        { label: 'RESUME', action: (hand) => { if (!this.heldHand) this._grab(hand === 'mouse' ? 'right' : hand); else this._resume(); this.input.requestHold && this.input.requestHold(); } },
+        { label: 'RESTART STAGE', action: (hand) => { this._attach(hand); this.startGame(0); } },
+        sound, exit,
+      ], 'center'];
+    }
+    if (this.state === 'title') return ['OPTIONS', [sound, exit], 'side'];
+    if (this.state === 'gameover' && this.restReady) {
+      const from = this.continueFrom >= WAVES.length ? 'THE GYRE' : `WAVE ${this.continueFrom + 1}`;
+      return ['GAME OVER', [
+        { label: `CONTINUE (${from})`, action: (hand) => { this._attach(hand); this.continues++; this.score = 0; this.startGame(this.continueFrom, true); } },
+        { label: 'RESTART STAGE', action: (hand) => { this._attach(hand); this.startGame(0); } },
+        exit,
+      ], 'side'];
+    }
+    if (this.state === 'victory' && this.restReady) {
+      return ['WELL DONE', [{ label: 'PLAY AGAIN', action: (hand) => { this._attach(hand); this.startGame(0); } }, sound, exit], 'side'];
+    }
+    return null;
+  }
+
+  _syncMenu() {
+    const spec = this._menuSpec();
+    const key = spec ? `${spec[0]}|${spec[1].map((i) => i.label).join(',')}` : '';
+    if (key === this.menuKey) return;
+    this.menuKey = key;
+    if (spec) this.menu.show(...spec);
+    else this.menu.hide();
   }
 
   recenter(head) {

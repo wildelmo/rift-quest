@@ -8,7 +8,7 @@ import { GRIP_OFFSET } from '../game/game.js';
 function makeHand() {
   return {
     grip: { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() },
-    ray: { quaternion: new THREE.Quaternion() },
+    ray: { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() },
     squeeze: 0, trigger: 0, a: false, b: false, stick: false,
     edges: { squeeze: false, trigger: false, a: false, b: false, stick: false },
     prev: { squeeze: false, trigger: false, a: false, b: false, stick: false },
@@ -61,9 +61,13 @@ export class XRInput {
         h.tracked = true;
       } else h.tracked = false;
       if (rpose) {
-        const o = rpose.transform.orientation;
+        const o = rpose.transform.orientation, p = rpose.transform.position;
         h.ray.quaternion.set(o.x, o.y, o.z, o.w);
-      } else h.ray.quaternion.copy(h.grip.quaternion);
+        h.ray.position.set(p.x, p.y, p.z);
+      } else {
+        h.ray.quaternion.copy(h.grip.quaternion);
+        h.ray.position.copy(h.grip.position);
+      }
       const b = gp.buttons;
       h.trigger = b[0] ? b[0].value : 0;
       h.squeeze = b[1] ? b[1].value : 0;
@@ -95,7 +99,7 @@ export class XRInput {
 
 /**
  * Desktop preview rig: the mouse moves the ship on a plane in front of the camera,
- * the wheel changes depth, left button charges, space / right button bombs.
+ * the wheel changes depth, holding the left button fires, space / right button bombs.
  */
 export class DesktopInput {
   constructor(dom, camera, getArena) {
@@ -112,13 +116,16 @@ export class DesktopInput {
     this.bKey = false;
     this.head = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
     this.raycaster = new THREE.Raycaster();
+    this.pointer = { hand: 'mouse', origin: new THREE.Vector3(), quaternion: new THREE.Quaternion(), select: false };
+    this.menuOpen = null;
     dom.addEventListener('pointermove', (e) => {
       const r = dom.getBoundingClientRect();
       this.ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     });
     dom.addEventListener('pointerdown', (e) => {
       if (e.button === 0) {
-        if (!this.holding) this.holding = true;
+        if (this.menuOpen && this.menuOpen()) this.menuClick = true;
+        else if (!this.holding) this.holding = true;
         else { this.trigger = true; this.triggerLatch = true; }
       }
       if (e.button === 2) { this.bombKey = true; this.bombLatch = true; }
@@ -135,13 +142,13 @@ export class DesktopInput {
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space') { this.bombKey = true; this.bombLatch = true; e.preventDefault(); }
       if (e.code === 'Escape' || e.code === 'KeyP') this.holding = !this.holding;
+      if (e.code === 'KeyB') this.bKey = true;
       if (e.code === 'KeyR') this.stickKey = true;
-      if (e.code === 'KeyM') this.bKey = true;
     });
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space') this.bombKey = false;
       if (e.code === 'KeyR') this.stickKey = false;
-      if (e.code === 'KeyM') this.bKey = false;
+      if (e.code === 'KeyB') this.bKey = false;
     });
     this._p = new THREE.Vector3();
     this._n = new THREE.Vector3();
@@ -180,11 +187,20 @@ export class DesktopInput {
     h.a = this.bombKey || this.bombLatch;
     this.triggerLatch = false;
     this.bombLatch = false;
+    // a mouse pointer for the in-game menu
+    this.pointer.origin.copy(this.raycaster.ray.origin);
+    this.pointer.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), this.raycaster.ray.direction);
+    this.pointer.select = this.menuClick;
+    this.menuClick = false;
     h.b = this.bKey;
     h.stick = this.stickKey;
     h.tracked = true;
     setEdges(h);
-    return { head: this.head, hands: { right: h } };
+    return { head: this.head, hands: { right: h }, pointer: this.pointer };
+  }
+
+  requestHold() {
+    this.holding = true;
   }
 
   haptic() {}
@@ -192,7 +208,7 @@ export class DesktopInput {
 
 /**
  * Autopilot used by automated play-throughs and attract screenshots: dodges nearby bullets,
- * lines up on targets, flies into the boss's eye, and uses charge shots and bombs.
+ * lines up on targets, flies into the boss's eye, fires and bombs.
  */
 export class BotInput {
   constructor(getGame, getArena) {
@@ -203,7 +219,6 @@ export class BotInput {
     this.vel = new THREE.Vector3();
     this.t = 0;
     this.head = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
-    this.chargeT = 0;
   }
 
   poll(nominalHead, dt) {
@@ -273,10 +288,7 @@ export class BotInput {
     h.grip.quaternion.copy(h.ray.quaternion);
     h.grip.position.copy(world).sub(GRIP_OFFSET.clone().applyQuaternion(h.ray.quaternion));
     h.squeeze = 1;
-    // charge cycle: hold 1.2s every ~5s
-    this.chargeT += dt;
-    const cyc = this.chargeT % 5;
-    h.trigger = target && cyc > 3.6 ? 1 : 0;
+    h.trigger = target ? 1 : 0;
     h.a = near > 14 && ship.bombs > 0 && Math.floor(this.t * 2) % 2 === 0;
     h.b = false;
     h.stick = false;

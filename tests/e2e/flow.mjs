@@ -43,13 +43,30 @@ try {
   await page.waitForFunction(() => window.__rift.game.restReady, null, { timeout: 30000 });
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${out}/flow-3-gameover.png` });
-  await page.mouse.down();
-  await page.waitForTimeout(200);
-  await page.mouse.up();
-  await page.waitForFunction(() => window.__rift.game.state === 'playing', null, { timeout: 5000 });
+  // pick CONTINUE on the game-over menu with the mouse pointer
+  const clickItem = async (label) => {
+    const pos = await page.evaluate((l) => { const r = window.__rift; const s = r.menuItemScreen(0); return r.menuItemScreen(s.labels.findIndex((x) => x.startsWith(l))); }, label);
+    await page.mouse.move(pos.x, pos.y);
+    await page.waitForTimeout(600);
+    await page.mouse.down();
+    await page.waitForTimeout(300);
+    await page.mouse.up();
+  };
+  await clickItem('CONTINUE');
+  await page.waitForFunction(() => window.__rift.game.state === 'playing', null, { timeout: 8000 });
   const after = await page.evaluate(() => ({ wave: window.__rift.game.waveIndex, lives: window.__rift.game.ship.lives, score: window.__rift.game.score }));
   assert.equal(after.wave, 1, 'continue resumes the same wave');
   assert.equal(after.lives, 3);
+  // B opens the pause menu while holding the ship; EXIT GAME returns to the start screen
+  await page.keyboard.down('KeyB');
+  await page.waitForTimeout(400);
+  await page.keyboard.up('KeyB');
+  await page.waitForFunction(() => window.__rift.game.state === 'paused' && window.__rift.game.menu.visible, null, { timeout: 5000 });
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: `${out}/flow-4-menu.png` });
+  await clickItem('EXIT');
+  await page.waitForFunction(() => window.__rift.overlayVisible && window.__rift.game.state === 'title', null, { timeout: 8000 });
+  assert.equal(await page.evaluate(() => window.__rift.game.audio.music.playing), false, 'music stopped on exit');
   if (errors.length) throw new Error('page errors:\n' + errors.join('\n'));
   console.log('FLOW OK');
 } catch (e) {

@@ -61,9 +61,65 @@ let game = null;
 const botInput = new BotInput(() => game, () => room.arena);
 let input = desktopInput;
 
-const inputProxy = { haptic: (hand, i, ms) => input.haptic(hand, i, ms) };
+const inputProxy = {
+  haptic: (hand, i, ms) => input.haptic(hand, i, ms),
+  requestHold: () => input.requestHold && input.requestHold(),
+};
 room.placeFromHead(nominalHead.position, nominalHead.quaternion);
 game = new Game({ scene, room, audio, input: inputProxy, options });
+desktopInput.menuOpen = () => game.menu.visible && game.menu.hover >= 0; // clicks go to the menu only when over a button
+game.onExit = () => exitGame();
+
+// ------------------------------------------------------------------ audio lifecycle
+// A WebXR page keeps running after you leave the headset view, so every way out of the game
+// must silence it: the in-game Exit button, the Quest system menu ending the session, or the
+// browser tab being hidden.
+function silence() {
+  audio.music.stop();
+  if (audio.ctx && audio.ctx.state === 'running') audio.ctx.suspend().catch(() => {});
+}
+async function wakeAudio() {
+  if (options.mute) return;
+  await audio.start().catch(() => {});
+  game.applyMute();
+  audio.music.play('stage', 'title');
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) silence();
+  else if (mode !== 'menu' && audio.ctx) audio.ctx.resume().catch(() => {});
+});
+window.addEventListener('pagehide', silence);
+
+async function exitGame() {
+  silence();
+  const session = renderer.xr.getSession();
+  if (session) {
+    try { await session.end(); } catch { /* already ending */ }
+  } else {
+    // desktop preview: back to the start screen
+    backToMenu();
+  }
+}
+
+function backToMenu(message) {
+  silence();
+  mode = 'menu';
+  input = desktopInput;
+  desktopInput.holding = false;
+  ui.overlay.classList.remove('hidden');
+  ui.hudHelp.classList.add('hidden');
+  if (message) ui.status.textContent = message;
+  game.heldHand = null;
+  game.ship.held = false;
+  room.placeFromHead(nominalHead.position, nominalHead.quaternion);
+  if (fakeRoom) {
+    fakeRoom.group.visible = true;
+    room.setPlanes(fakeRoom.planes);
+    room.layoutRifts();
+  }
+  game.hud.retilt();
+  game.toTitle();
+}
 
 // The stand-in room renders as its own background pass, then depth is cleared, so virtual
 // content always draws over it - exactly how passthrough behaves on the headset.
@@ -109,14 +165,14 @@ let mode = 'menu';
 let xrPlaced = false;
 
 async function startDesktop() {
-  if (!options.mute) await audio.start().catch(() => {});
+  await wakeAudio();
   ensureFakeRoom();
   placeDesktopCamera();
   ui.overlay.classList.add('hidden');
   ui.hudHelp.classList.remove('hidden');
   mode = 'desktop';
   input = options.bot ? botInput : desktopInput;
-  if (audio.ctx) audio.music.play('stage', 'title');
+  game.toTitle();
   if (options.autostart) {
     desktopInput.holding = true;
     game.heldHand = 'right';
@@ -127,11 +183,7 @@ async function startDesktop() {
 
 async function startXR(kind) {
   const sessionMode = kind === 'ar' ? 'immersive-ar' : 'immersive-vr';
-  try {
-    await audio.start();
-  } catch (e) {
-    console.warn('audio failed', e);
-  }
+  await wakeAudio();
   const init = {
     requiredFeatures: ['local-floor'],
     optionalFeatures: ['plane-detection'],
@@ -158,24 +210,11 @@ async function startXR(kind) {
   xrPlaced = false;
   ui.overlay.classList.add('hidden');
   await renderer.xr.setSession(session);
-  audio.music.play('stage', 'title');
+  game.toTitle();
   // The system recentre gesture resets the reference space: re-place the arena in front of the player.
   const refSpace = renderer.xr.getReferenceSpace();
   if (refSpace && refSpace.addEventListener) refSpace.addEventListener('reset', () => { xrPlaced = false; });
-  session.addEventListener('end', () => {
-    mode = 'menu';
-    input = desktopInput;
-    ui.overlay.classList.remove('hidden');
-    game.heldHand = null;
-    room.placeFromHead(nominalHead.position, nominalHead.quaternion);
-    if (fakeRoom) {
-      fakeRoom.group.visible = true;
-      room.setPlanes(fakeRoom.planes);
-      room.layoutRifts();
-    }
-    game.hud.retilt();
-    game.toTitle();
-  });
+  session.addEventListener('end', () => backToMenu('Game closed. Tap Enter Mixed Reality to play again.'));
 }
 
 async function detectXR() {
@@ -288,4 +327,12 @@ function renderFrame() {
 
 
 // expose for automated tests and debugging
-window.__rift = { game, room, renderer, scene, options, startDesktop };
+window.__rift = {
+  game, room, renderer, scene, options, startDesktop,
+  // screen-space pixel position of a menu item, for automated UI tests
+  menuItemScreen(i) {
+    const p = game.menu.itemWorldPos(i).project(camera);
+    return { x: (p.x + 1) / 2 * window.innerWidth, y: (1 - p.y) / 2 * window.innerHeight, labels: game.menu.items.map((it) => it.label) };
+  },
+  get overlayVisible() { return !ui.overlay.classList.contains('hidden'); },
+};

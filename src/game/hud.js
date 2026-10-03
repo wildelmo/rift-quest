@@ -235,9 +235,9 @@ export class Hud {
       drawText(ctx, 'GRAB THE SHIP', w / 2, h * 0.53, { size: 74, color: '#ffffff', glow: '#33e1ff' });
       const rows = [
         ['GRIP', 'hold the ship — it moves with your hand'],
-        ['AUTO', 'it fires wherever its nose points'],
-        ['TRIGGER', 'hold to charge, release for a wave blast'],
+        ['TRIGGER', 'hold to fire — shots go where the nose points'],
         ['A / X', 'singularity bomb (or off-hand trigger)'],
+        ['B / Y', 'menu: resume, restart, sound, exit'],
         ['LET GO', 'pause'],
       ];
       rows.forEach(([k, v], i) => {
