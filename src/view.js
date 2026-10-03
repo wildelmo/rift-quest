@@ -133,7 +133,7 @@ export class View {
         c.fillStyle=selected?'#102019':row.id==='exit'?'#ffa17c':'#e1f5e9';c.font='bold 38px monospace';c.fillText((selected?'› ':'  ')+row.label,64,y+46);
         c.textAlign='right';c.font='36px monospace';c.fillText(row.value,w-72,y+46);c.textAlign='left';
       }
-      c.fillStyle='#a9c4b6';c.font='26px monospace';c.fillText('LEFT STICK ↑↓ SELECT / ←→ ADJUST',64,1030);c.fillText('RIGHT TRIGGER CONFIRM · B RESUME · X RECENTER',64,1078);c.font='22px monospace';c.fillText(menu.deploying?'LOOK STRAIGHT AHEAD · RIGHT TRIGGER CENTERS THE ARENA AND DEPLOYS':'AIM: POINT RIGHT HAND · HOLD RIGHT STICK TO HOLD SHIP',64,1120);
+      c.fillStyle='#a9c4b6';c.font='26px monospace';c.fillText('LEFT STICK ↑↓ SELECT / ←→ ADJUST',64,1030);c.fillText('RIGHT TRIGGER CONFIRM · B RESUME · X RECENTER',64,1078);c.font='22px monospace';c.fillText(menu.deploying?'ARENA STAYS HERE · RIGHT TRIGGER DEPLOYS · X RECENTERS':'AIM: POINT RIGHT HAND · HOLD RIGHT STICK TO HOLD SHIP',64,1120);
     });
     const p=game.player;this.message.position.y=paused||game.state!=='playing'?.4:4.05;this.message.scale.setScalar(paused||game.state!=='playing'?1:.60); this.hud.visible=xr; this.message.visible=xr && !paused && ( game.state==='lost' || (game.state==='won'&&!this.cinematics.some(c=>c.kind==='death')) || (game.state==='playing'&&!!message)); this.corners.visible=!xr || paused;
     if (xr) this.paintPanel(this.hud,`${p.hp}/${p.shield}/${p.weapon}/${p.level}/${p.echo}/${p.vector}/${p.missiles}/${game.bombs}/${game.score}/${Math.floor(p.charge*10)}`,c=>{

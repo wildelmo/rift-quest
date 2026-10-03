@@ -63,7 +63,9 @@ function resumeGame() {
   if (exiting) return;
   if (game.state !== 'playing') resetGame();
   if (needsPlacement||roomLock.requiresRecenter||roomLock.lost||(xrSession&&!lastPose)) return;
-  if(xrSession&&deploymentPending){if(!lastPose||!placeRoom(lastPose))return;deploymentPending=false;roomLock.placed();}
+  // Deploy confirms the visible setup placement; sampling gaze again would
+  // rotate the arena as the player glances at the menu or controller.
+  if(xrSession&&deploymentPending){deploymentPending=false;roomLock.placed();}
   setPaused(false);
 }
 function restartGame() {
@@ -230,7 +232,7 @@ function animate(ms,frame){
     if(pendingResult&&now>=pendingResult.at&&(!pendingResult.won||!view.cinematics.some(c=>c.kind==='death')))showResult();
     sound.update(!paused&&game.state==='playing',game.boss?.phase||0,game.player.charge,game.act);view.update(game,paused?0:dt,now);view.updateTether(motionCue,game.player,!!xrSession&&!paused&&game.state==='playing');
     if(now-messageUntil>0)message=null;
-    view.hudUpdate(game,!!xrSession,paused,message,settings,{rows:menu.rows(settings,game.state!=='playing',needsPlacement),selected:menu.selected,deploying:deploymentPending,tracking:roomLock.requiresRecenter?'recenter':roomLock.lost?'lost':roomLock.mode});
+    view.hudUpdate(game,!!xrSession,paused,message,settings,{rows:menu.rows(settings,game.state!=='playing',deploymentPending),selected:menu.selected,deploying:deploymentPending,tracking:roomLock.requiresRecenter?'recenter':roomLock.lost?'lost':roomLock.mode});
     uiClock+=dt;if(uiClock>.1){updateDOM(now);uiClock=0;}
   }
   view.render(now,playing);
