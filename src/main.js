@@ -16,7 +16,7 @@ let playing = false, paused = false, xrSession = null, needsPlacement = false, l
 let exiting = false, exitPromise = null, loopRunning = false, frameCount = 0;
 let pendingResult = null, message = null, messageUntil = 0, lastTime = 0, uiClock = 0, endTime = 0, fixedAccumulator = 0;
 const keys = new Set(), previousButtons = new Map();
-function applySettings() {
+function applySettings(roomFit = false) {
   sound.setVolume(settings.volume, settings.musicVolume);
   game.setDifficulty(settings.difficulty);
   for (const prefix of ['', 'pause-']) {
@@ -30,7 +30,7 @@ function applySettings() {
   }
   $('difficulty-hint').textContent = DIFFICULTIES[settings.difficulty].hint;
   try { localStorage.setItem('rift-settings', JSON.stringify(settings)); } catch {}
-  if (xrSession && lastPose && paused) view.place(lastPose, settings);
+  if (roomFit && xrSession && lastPose && paused) view.place(lastPose, settings);
 }
 applySettings();
 function startLoop() { if (exiting || document.hidden || loopRunning) return; lastTime = 0; loopRunning = true; if(view.renderer.xr.isPresenting)view.renderer.xr.setAnimationLoop(animate);else view.renderer.setAnimationLoop(animate); }
@@ -102,7 +102,7 @@ for (const prefix of ['', 'pause-']) {
     $(prefix + id).addEventListener(id === 'difficulty' ? 'change' : 'input', e => { settings[key] = key === 'difficulty' ? e.target.value : Number(e.target.value); applySettings(); });
   }
 }
-for (const [id, key] of [['distance', 'distance'], ['arena-width', 'width']]) $(id).addEventListener('input', e => { settings[key] = Number(e.target.value); applySettings(); });
+for (const [id, key] of [['distance', 'distance'], ['arena-width', 'width']]) $(id).addEventListener('input', e => { settings[key] = Number(e.target.value); applySettings(true); });
 addEventListener('keydown', e => {
   if (!playing || xrSession || exiting || e.target.closest('input,select,button,a')) return;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight'].includes(e.code)) e.preventDefault();
@@ -170,7 +170,7 @@ function readInput(dt, now) {
   if (recenter) { setPaused(true); needsPlacement = true; }
   if (paused) {
     const action = menu.input(input.x, input.y, trigger, now, settings);
-    if (action === 'changed') applySettings();
+    if (action === 'changed') applySettings(['width','distance'].includes(menu.rows(settings)[menu.selected].id));
     if (action === 'resume') resumeGame();
     if (action === 'restart') restartGame();
     if (action === 'recenter') { needsPlacement = true; menu.open(); }

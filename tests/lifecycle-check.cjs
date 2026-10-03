@@ -61,6 +61,22 @@ const fs = require('node:fs');
     });
     await load(); await page.evaluate(() => { window.__rift.view.renderer.xr.setSession = async () => {}; window.close = () => {}; });
     await page.click('#enter-xr'); await page.waitForFunction(() => document.body.classList.contains('xr'));
+    const anchoring=await page.evaluate(()=>{
+      const r=window.__rift,renderer=r.view.renderer,original=renderer.setAnimationLoop.bind(renderer);let animate;
+      renderer.setAnimationLoop=callback=>{if(callback)animate=callback;return original(callback);};
+      fakeSession.visibilityState='hidden';fakeSession.dispatchEvent(new Event('visibilitychange'));
+      fakeSession.visibilityState='visible';fakeSession.dispatchEvent(new Event('visibilitychange'));
+      const pose=x=>({transform:{orientation:{x:0,y:0,z:0,w:1},position:{x,y:1.7,z:0}}});
+      animate(1000,{getViewerPose:()=>pose(1)});const before=r.view.root.position.toArray();
+      animate(1011,{getViewerPose:()=>pose(2)});
+      document.getElementById('pause-music-volume').dispatchEvent(new Event('input'));
+      const after=r.view.root.position.toArray();
+      r.menu.selected=4;fakeSession.inputSources[0].gamepad.axes[2]=1;r.readInput(.01,99);fakeSession.inputSources[0].gamepad.axes[2]=0;
+      const fitted=r.view.root.position.toArray();r.menu.open();renderer.setAnimationLoop=original;
+      return{before,after,fitted};
+    });
+    assert.deepEqual(anchoring.after,anchoring.before);assert.notDeepEqual(anchoring.fitted,anchoring.before);
+    results.push('volume changes preserve the world anchor; deliberate room-fit changes reposition the arena');
     const xrMenu = await page.evaluate(() => {
       const r = window.__rift, left = fakeSession.inputSources[0].gamepad;
       left.axes[3] = 1; r.readInput(.01, 100); left.axes[3] = 0; r.readInput(.01, 100.1);
