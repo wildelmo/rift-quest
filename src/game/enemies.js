@@ -203,7 +203,8 @@ export function spawnBloom(game, from, station, opts = {}) {
     const style = opts.style ?? 'spiral';
     const duration = opts.duration ?? 9;
     let t = 0;
-    let phase = rand(0, TAU);
+    let phase = rand(0, TAU) + (opts.ringPhase || 0);
+    let hugeT = 1.2;
     open = 1;
     spin = 3;
     while (t < duration) {
@@ -215,6 +216,13 @@ export function spawnBloom(game, from, station, opts = {}) {
         for (const d of dirs) game.bullets.spawn(e.pos.x, e.pos.y, e.pos.z, d.x * 0.36, d.y * 0.36, d.z * 0.36, opts.kind ?? 'small');
         phase += opts.phaseStep ?? 0.33;
         game.sfx.play('enemyShot', game.worldPos(e.pos), { vol: 0.25, minGap: 0.12 });
+        // big slow energy balls that drift through the room
+        hugeT -= opts.interval ?? 0.13;
+        if (opts.huge && hugeT <= 0) {
+          hugeT = 2.6;
+          for (const d of fan(aim, 3, 0.5, rand(0, Math.PI))) game.bullets.spawn(e.pos.x, e.pos.y, e.pos.z, d.x * 0.2, d.y * 0.2, d.z * 0.2, 'huge');
+          game.sfx.play('enemyShotBig', game.worldPos(e.pos), { vol: 0.7 });
+        }
         yield opts.interval ?? 0.13;
         t += opts.interval ?? 0.13;
       } else if (style === 'rings') {

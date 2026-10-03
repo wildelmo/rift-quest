@@ -65,15 +65,31 @@ void main() {
   int shape = int(vShape.y + 0.5);
   vec3 col = vColor.rgb;
   float a = 0.0;
+  float addv = vShape.x;
   if (shape == 0) {
+    // Glossy lit sphere with a soft glow halo (Xortex-style energy ball).
     if (r > 1.0) discard;
-    float core = smoothstep(0.46, 0.30, r);
-    float body = smoothstep(0.80, 0.70, r);
-    float rim = smoothstep(1.0, 0.88, r);
-    vec3 c = mix(vec3(0.03, 0.0, 0.04), col, body);
-    c = mix(c, vec3(1.0), core);
-    col = c;
-    a = rim;
+    float R = 0.56;
+    if (r < R) {
+      vec2 q = p / R;
+      float z = sqrt(max(0.0, 1.0 - dot(q, q)));
+      vec3 n = vec3(q, z);
+      vec3 L = normalize(vec3(-0.45, 0.6, 0.65));
+      float diff = 0.42 + 0.58 * max(dot(n, L), 0.0);
+      float spec = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 18.0);
+      float fres = pow(1.0 - z, 2.2);
+      vec3 hot = mix(col, vec3(1.0, 0.85, 0.9), 0.55);
+      col = col * diff + hot * fres * 0.9 + vec3(1.0) * spec * 0.75;
+      // a little edge darkening so the ball separates from bright walls
+      col *= mix(0.55, 1.0, smoothstep(R, R - 0.06, r));
+      a = 1.0;
+      addv = 0.0;
+    } else {
+      float h = (r - R) / (1.0 - R);
+      a = exp(-h * 4.5) * (1.0 - h) * 0.75;
+      col = mix(col, vec3(1.0, 0.6, 0.85), 0.35) * 1.3;
+      addv = 0.75;
+    }
   } else if (shape == 1) {
     a = exp(-r * r * 4.0) * (1.0 - smoothstep(0.85, 1.0, r));
   } else if (shape == 2) {
@@ -108,8 +124,7 @@ void main() {
     a = edge;
   }
   a *= vColor.a;
-  float additive = vShape.x;
-  gl_FragColor = vec4(col * a, a * (1.0 - additive * 0.85));
+  gl_FragColor = vec4(col * a, a * (1.0 - addv * 0.85));
 }
 `;
 

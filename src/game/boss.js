@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clamp, easeInOutCubic, easeOutBack, inAperture, rand, segmentSphere, torusDistance, TAU } from '../engine/math.js';
-import { gyreCore, gyreEmitter, gyreFins, gyrePod, gyreRing, gyreShell, PALETTE } from './models.js';
+import { gyreCore, gyreEmitter, gyreFins, gyrePod, gyreRing, gyreShell, PALETTE, flareTexture } from './models.js';
 import { cone, dirTo, fan, normalize, shell } from './patterns.js';
 import { COLORS } from './fx.js';
 
@@ -13,6 +13,7 @@ import { COLORS } from './fx.js';
 export const BOSS_HP = { pod: 170, emitter: 300, core: 1100 };
 export const APERTURE_HIT_ANGLE = 0.25;
 export const EYE_CONE = 0.16;
+export const RINGS = { inner: 0.31, mid: 0.48, outer: 0.68, shell: 0.2 };
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -106,31 +107,45 @@ export class Gyre {
     this.root.add(this.body);
     this.core = gyreCore();
     this.root.add(this.core);
-    this.coreLight = new THREE.PointLight(0xff3d9a, 0, 1.6, 1.5);
+    this.coreLight = new THREE.PointLight(0x7aeaff, 0, 2.2, 1.4);
     this.root.add(this.coreLight);
+    // blinding core flare (occluded by the shell until the aperture opens)
+    this.flare = new THREE.Sprite(new THREE.SpriteMaterial({ map: flareTexture(), color: 0xc8fbff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+    this.flare.scale.setScalar(0.5);
+    this.flare.renderOrder = 8;
+    this.root.add(this.flare);
+    // electric arcs crackling out of the open aperture
+    this.arcSegs = 7;
+    this.arcCount = 6;
+    const arcGeo = new THREE.BufferGeometry();
+    arcGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this.arcCount * this.arcSegs * 2 * 3), 3));
+    this.arcs = new THREE.LineSegments(arcGeo, new THREE.LineBasicMaterial({ color: 0x9ef4ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+    this.arcs.frustumCulled = false;
+    this.arcs.visible = false;
+    this.root.add(this.arcs);
 
     this.shellPivot = new THREE.Group();
-    const { shell: shellMesh, cap } = gyreShell(0.17, 0.3);
+    const { shell: shellMesh, cap } = gyreShell(RINGS.shell, 0.42);
     this.shellMesh = shellMesh;
     this.cap = cap;
     this.shellPivot.add(shellMesh, cap);
     this.root.add(this.shellPivot);
-    this.shellRadius = 0.17;
+    this.shellRadius = RINGS.shell + 0.015;
 
     this.inner = new THREE.Group();
-    this.innerRing = gyreRing(0.27, 0.017, 10, PALETTE.bossGold, 0xff2d7a, 6);
+    this.innerRing = gyreRing(RINGS.inner, 0.019, 10, PALETTE.bossGold, 0xff2244, 6);
     this.inner.add(this.innerRing);
     this.root.add(this.inner);
 
     this.mid = new THREE.Group();
-    this.midRing = gyreRing(0.43, 0.019, 14, PALETTE.bossMetal, 0xff4060, 0);
+    this.midRing = gyreRing(RINGS.mid, 0.021, 14, PALETTE.bossMetal, 0xff2244, 0);
     this.mid.add(this.midRing);
     this.root.add(this.mid);
 
     this.outerTilt = new THREE.Group();
     this.outerTilt.rotation.x = -0.42;
     this.outer = new THREE.Group();
-    this.outerRing = gyreRing(0.62, 0.022, 16, PALETTE.bossMetal, 0xffa31a, 12);
+    this.outerRing = gyreRing(RINGS.outer, 0.025, 16, PALETTE.bossMetal, 0x55e6ff, 12);
     this.outer.add(this.outerRing);
     this.outerTilt.add(this.outer);
     this.root.add(this.outerTilt);
@@ -140,7 +155,7 @@ export class Gyre {
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * TAU + Math.PI / 4;
       const mount = new THREE.Group();
-      mount.position.set(Math.cos(a) * 0.62, Math.sin(a) * 0.62, 0.035);
+      mount.position.set(Math.cos(a) * RINGS.outer, Math.sin(a) * RINGS.outer, 0.04);
       const pod = gyrePod();
       mount.add(pod);
       this.outer.add(mount);
@@ -152,7 +167,7 @@ export class Gyre {
     this.emitters = [];
     for (const sx of [-1, 1]) {
       const mount = new THREE.Group();
-      mount.position.set(sx * 0.43, 0, 0);
+      mount.position.set(sx * RINGS.mid, 0, 0);
       const em = gyreEmitter();
       mount.add(em);
       this.mid.add(mount);
@@ -161,7 +176,7 @@ export class Gyre {
       part.side = sx;
       this.emitters.push(part);
     }
-    this.corePart = new Part(this, this.core, { hp: BOSS_HP.core, radius: 0.1, name: 'core', score: 50000, kind: 'core' });
+    this.corePart = new Part(this, this.core, { hp: BOSS_HP.core, radius: 0.12, name: 'core', score: 50000, kind: 'core' });
     this.parts = [...this.pods, ...this.emitters, this.corePart];
 
     // the "eye": translucent cone showing where the aperture looks in phase III
@@ -316,7 +331,15 @@ export class Gyre {
         phase += 0.28;
         yield 0.12;
       }
-      yield 3.6;
+      yield 0.8;
+      // a volley of huge slow energy balls that drift out through the whole room
+      const aim = dirTo(this.root.position, g.ship.pos);
+      for (const d of fan(aim, 5, 1.1, rand(-0.4, 0.4))) {
+        const o = _v.copy(d).multiplyScalar(this.shellRadius + 0.03).add(this.root.position);
+        g.bullets.spawn(o.x, o.y, o.z, d.x * 0.22, d.y * 0.22, d.z * 0.22, 'huge');
+      }
+      g.sfx.play('enemyShotBig', g.worldPos(this.root.position), { vol: 1, rate: 0.7 });
+      yield 2.8;
     }
   }
 
@@ -401,9 +424,10 @@ export class Gyre {
       // Sealed shell vents an expanding curtain with a gap - read the hole, slip through.
       const aim = dirTo(this.root.position, g.ship.pos);
       const gap = normalize({ x: aim.x + rand(-0.12, 0.12), y: aim.y + rand(-0.08, 0.08), z: aim.z });
+      let i = 0;
       for (const d of shell(170, aim, 0.6, gap, 0.15, phase)) {
         const o = _v.set(d.x, d.y, d.z).multiplyScalar(this.shellRadius).add(this.root.position);
-        g.bullets.spawn(o.x, o.y, o.z, d.x * 0.27, d.y * 0.27, d.z * 0.27, 'medium');
+        g.bullets.spawn(o.x, o.y, o.z, d.x * 0.27, d.y * 0.27, d.z * 0.27, i++ % 9 === 0 ? 'large' : 'medium');
       }
       g.sfx.play('enemyShotBig', g.worldPos(this.root.position), { vol: 1 });
       phase += 0.9;
@@ -411,7 +435,7 @@ export class Gyre {
       // inner ring vents: rotating rice streams
       for (let i = 0; i < 10; i++) {
         const a = phase + i * 0.4;
-        const o = _v.set(Math.cos(a) * 0.27, Math.sin(a) * 0.27, 0.02).add(this.root.position);
+        const o = _v.set(Math.cos(a) * RINGS.inner, Math.sin(a) * RINGS.inner, 0.02).add(this.root.position);
         const d = dirTo(o, g.ship.pos);
         g.bullets.spawn(o.x, o.y, o.z, d.x * 0.45, d.y * 0.45, d.z * 0.45, 'rice');
         yield 0.09;
@@ -453,7 +477,7 @@ export class Gyre {
       const d = this.eyeDir;
       const o = _v.copy(d).multiplyScalar(this.shellRadius + 0.01).add(this.root.position);
       const n = this.rage ? 11 : 9;
-      for (const b of cone(d, n, coneA, phase)) g.bullets.spawn(o.x, o.y, o.z, b.x * 0.42, b.y * 0.42, b.z * 0.42, 'small', { color: COLORS.pink });
+      for (const b of cone(d, n, coneA, phase)) g.bullets.spawn(o.x, o.y, o.z, b.x * 0.42, b.y * 0.42, b.z * 0.42, 'small');
       phase += this.rage ? 0.21 : 0.17;
       t += rate;
       yield rate;
@@ -467,7 +491,7 @@ export class Gyre {
     while (true) {
       // aimed pellets from the inner ring force you to keep shifting inside the eye
       const a = k * 1.7;
-      const o = _v.set(Math.cos(a) * 0.27, Math.sin(a) * 0.27, 0).applyQuaternion(this.inner.quaternion).add(this.root.position);
+      const o = _v.set(Math.cos(a) * RINGS.inner, Math.sin(a) * RINGS.inner, 0).applyQuaternion(this.inner.quaternion).add(this.root.position);
       const d = dirTo(o, g.ship.pos);
       g.bullets.spawn(o.x, o.y, o.z, d.x * 0.5, d.y * 0.5, d.z * 0.5, 'medium');
       g.sfx.play('enemyShot', g.worldPos(o), { vol: 0.6 });
@@ -484,7 +508,7 @@ export class Gyre {
         // desperation: spinning rice spiral from every vent
         for (let i = 0; i < 6; i++) {
           const aa = a + (i / 6) * TAU;
-          const oo = _v2.set(Math.cos(aa) * 0.27, Math.sin(aa) * 0.27, 0).applyQuaternion(this.inner.quaternion).add(this.root.position);
+          const oo = _v2.set(Math.cos(aa) * RINGS.inner, Math.sin(aa) * RINGS.inner, 0).applyQuaternion(this.inner.quaternion).add(this.root.position);
           const dd = normalize({ x: Math.cos(aa) * 0.5, y: Math.sin(aa) * 0.4, z: 1 });
           g.bullets.spawn(oo.x, oo.y, oo.z, dd.x * 0.4, dd.y * 0.4, dd.z * 0.4, 'rice', { turn: 0.25 * (i % 2 ? 1 : -1) });
         }
@@ -499,9 +523,9 @@ export class Gyre {
     g.onBossPartDestroyed(part);
     part.object.visible = false;
     if (part.kind === 'pod') {
-      if (this.pods.every((p) => !p.alive)) this._breakRing(this.outer, this.outerRing, 0.62, () => this._startLattice());
+      if (this.pods.every((p) => !p.alive)) this._breakRing(this.outer, this.outerRing, RINGS.outer, () => this._startLattice());
     } else if (part.kind === 'emitter') {
-      if (this.emitters.every((p) => !p.alive)) this._breakRing(this.mid, this.midRing, 0.43, () => this._startHeart());
+      if (this.emitters.every((p) => !p.alive)) this._breakRing(this.mid, this.midRing, RINGS.mid, () => this._startHeart());
     } else if (part.kind === 'core') {
       this._die();
     }
@@ -654,7 +678,11 @@ export class Gyre {
     const exposed = this.phase === 'heart';
     const pulse = 1 + Math.sin(t * (exposed ? 9 : 4)) * (exposed ? 0.08 : 0.04);
     if (this.phase !== 'dying') this.core.scale.setScalar(pulse * (exposed ? 1 : 0.8));
-    this.coreLight.intensity = exposed ? 0.8 + 0.4 * Math.sin(t * 9) : 0.3;
+    this.coreLight.intensity = exposed ? 2.2 + 0.8 * Math.sin(t * 9) : 0.4;
+    const flick = 0.85 + 0.15 * Math.sin(t * 37) * Math.sin(t * 13);
+    this.flare.scale.setScalar((exposed ? 0.75 : 0.42) * flick * (this.phase === 'dying' ? 1.6 : 1));
+    this.arcs.visible = exposed && this.capOff;
+    if (this.arcs.visible) this._updateArcs();
 
     // sync weak point positions + hit flashes
     for (const p of this.parts) {
@@ -670,11 +698,38 @@ export class Gyre {
     // cache armour transforms (arena-local -> ring-local) for shot tests
     this._armor = [];
     const arenaInv = _m.copy(g.arena.matrixWorld).invert();
-    for (const [ring, R, r] of [[this.innerRing, 0.27, 0.02], [this.midRing, 0.43, 0.022], [this.outerRing, 0.62, 0.025]]) {
+    for (const [ring, R, r] of [[this.innerRing, RINGS.inner, 0.022], [this.midRing, RINGS.mid, 0.024], [this.outerRing, RINGS.outer, 0.028]]) {
       if (!ring.visible || !ring.parent) continue;
       const toLocal = new THREE.Matrix4().multiplyMatrices(arenaInv, ring.matrixWorld).invert();
       this._armor.push({ toLocal, R, r });
     }
+  }
+
+  _updateArcs() {
+    const arr = this.arcs.geometry.attributes.position.array;
+    const d = this.eyeDir;
+    const up = Math.abs(d.y) < 0.9 ? _v2.set(0, 1, 0) : _v2.set(1, 0, 0);
+    const u = _v3.crossVectors(d, up).normalize();
+    const w = new THREE.Vector3().crossVectors(d, u);
+    let k = 0;
+    for (let a = 0; a < this.arcCount; a++) {
+      const ang = Math.random() * TAU;
+      const reach = this.shellRadius * rand(1.0, 1.9);
+      const spread = Math.sin(0.42) * this.shellRadius * rand(0.8, 1.6);
+      let px = 0, py = 0, pz = 0;
+      for (let i = 1; i <= this.arcSegs; i++) {
+        const f = i / this.arcSegs;
+        const ox = Math.cos(ang) * spread * f, oy = Math.sin(ang) * spread * f;
+        const j = 0.018 * (1 - Math.abs(f - 0.5) * 2 + 0.3);
+        const nx = d.x * reach * f + u.x * ox + w.x * oy + rand(-j, j);
+        const ny = d.y * reach * f + u.y * ox + w.y * oy + rand(-j, j);
+        const nz = d.z * reach * f + u.z * ox + w.z * oy + rand(-j, j);
+        arr[k++] = px; arr[k++] = py; arr[k++] = pz;
+        arr[k++] = nx; arr[k++] = ny; arr[k++] = nz;
+        px = nx; py = ny; pz = nz;
+      }
+    }
+    this.arcs.geometry.attributes.position.needsUpdate = true;
   }
 
   /** Armour test for a player shot. Returns 'armor' when blocked, or null. */

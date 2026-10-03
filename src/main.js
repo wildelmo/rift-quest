@@ -65,10 +65,17 @@ const inputProxy = { haptic: (hand, i, ms) => input.haptic(hand, i, ms) };
 room.placeFromHead(nominalHead.position, nominalHead.quaternion);
 game = new Game({ scene, room, audio, input: inputProxy, options });
 
+// The stand-in room renders as its own background pass, then depth is cleared, so virtual
+// content always draws over it - exactly how passthrough behaves on the headset.
+const roomScene = new THREE.Scene();
+roomScene.add(new THREE.HemisphereLight(0xe6efff, 0x3a3028, 1.3));
+const roomKey = new THREE.DirectionalLight(0xfff4e0, 1.6);
+roomKey.position.set(-1.5, 3, 1.5);
+roomScene.add(roomKey);
 let fakeRoom = null;
 function ensureFakeRoom() {
   if (fakeRoom) return;
-  fakeRoom = buildFakeRoom(scene);
+  fakeRoom = buildFakeRoom(roomScene);
   room.setPlanes(fakeRoom.planes);
   room.layoutRifts();
 }
@@ -243,8 +250,7 @@ renderer.setAnimationLoop((time, frame) => {
       for (let i = 0; i < options.substeps - 1; i++) game.update(1 / 60, input.poll(nominalHead, 1 / 60));
       frameInput = input.poll(nominalHead, 1 / 60);
       game.update(1 / 60, frameInput);
-      if (fakeRoom) dimFakeRoom();
-      renderer.render(scene, camera);
+      renderFrame();
       return;
     }
     frameInput = input.poll(nominalHead, dt);
@@ -254,22 +260,32 @@ renderer.setAnimationLoop((time, frame) => {
     frameInput = { head: nominalHead, hands: {} };
   }
   game.update(dt, frameInput);
-  if (fakeRoom) dimFakeRoom();
-  renderer.render(scene, camera);
+  renderFrame();
 });
 
-// In the virtual stand-in room, emulate the passthrough dimming the boss causes.
-let lastDim = -1;
-function dimFakeRoom() {
-  const d = room.dim;
-  if (Math.abs(d - lastDim) < 0.005) return;
-  lastDim = d;
-  fakeRoom.group.traverse((o) => {
-    if (!o.material || !o.material.color) return;
-    if (!o.userData.baseColor) o.userData.baseColor = o.material.color.clone();
-    o.material.color.copy(o.userData.baseColor).multiplyScalar(1 - d * 0.85);
-  });
+function renderFrame() {
+  const showRoom = fakeRoom && fakeRoom.group.visible && mode !== 'ar';
+  if (!showRoom) {
+    renderer.autoClear = true;
+    renderer.render(scene, camera);
+    return;
+  }
+  if (renderer.xr.isPresenting) {
+    // VR fallback: one pass, the room is part of the world
+    if (fakeRoom.group.parent !== scene) scene.add(fakeRoom.group);
+    renderer.autoClear = true;
+    renderer.render(scene, camera);
+    return;
+  }
+  if (fakeRoom.group.parent !== roomScene) roomScene.add(fakeRoom.group);
+  renderer.autoClear = false;
+  renderer.clear();
+  renderer.render(roomScene, camera);
+  renderer.clearDepth();
+  renderer.render(scene, camera);
 }
+
+
 
 // expose for automated tests and debugging
 window.__rift = { game, room, renderer, scene, options, startDesktop };

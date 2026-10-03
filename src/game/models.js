@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // Procedural, low-poly but sculpted models. Every model merges its parts into two meshes:
 // a lit "hull" (flat-shaded metal with vertex colours) and an unlit "glow" layer. That keeps
@@ -15,9 +15,11 @@ export const PALETTE = {
   enemyTrim: 0xb3263e,
   enemyGlow: 0xff2d7a,
   enemyHot: 0xffa31a,
-  bossMetal: 0x5c6273,
-  bossDark: 0x1d1f27,
-  bossGold: 0xc79a3a,
+  bossMetal: 0x3b404b,
+  bossDark: 0x14161b,
+  bossGold: 0x8a2a36,
+  bossPlate: 0x231417,
+  bossSeam: 0xff2244,
 };
 
 let envMap = null;
@@ -140,34 +142,49 @@ function wing(points, thickness) {
   return g;
 }
 
-// ---------- player ship: "LANCET" ----------
-// Length ~7.5cm, nose along -Z. Hitbox core sits at the cockpit centre (origin).
+// ---------- player ship: "LANCET" drone fighter ----------
+// A chunky gunmetal drone with twin ring turbines (Xortex-style), ~13 cm wide. Nose along -Z.
+// The hitbox core sits at the origin, inside the cockpit.
+export const SHIP_TURBINES = [[-0.047, -0.002, 0.012], [0.047, -0.002, 0.012]];
+
 export function buildPlayerShip() {
   const b = new ModelBuilder();
-  const C = PALETTE;
-  // fuselage: long hex nose, mid body, tail
-  b.add(taper(0.0095, 0.0012, 0.04, 6), C.playerHull, { pos: [0, 0, -0.022], scale: [1, 0.7, 1] });
-  b.add(taper(0.011, 0.0095, 0.022, 6), C.playerHull, { pos: [0, 0, 0.009], scale: [1, 0.72, 1] });
-  b.add(taper(0.0085, 0.011, 0.012, 6), C.playerDark, { pos: [0, 0, 0.026], scale: [1, 0.72, 1] });
-  // dorsal spine + canopy
-  b.add(taper(0.0045, 0.002, 0.026, 4), C.playerTrim, { pos: [0, 0.0062, -0.004], scale: [1, 0.8, 1] });
-  b.add(new THREE.SphereGeometry(0.0058, 8, 6), C.playerGlow, { pos: [0, 0.0058, -0.012], scale: [0.85, 0.55, 1.9], glow: true });
-  // main wings, swept forward-swept hybrid
-  const wingPts = [[0.006, 0.012], [0.032, 0.022], [0.036, 0.016], [0.026, 0.0], [0.009, -0.012]];
-  b.add(wing(wingPts, 0.0016), C.playerHull, { pos: [0, -0.0015, 0] , mirrorX: true });
-  // wing stripes
-  b.add(wing([[0.015, 0.0145], [0.03, 0.0205], [0.031, 0.0175], [0.017, 0.0105]], 0.0005), C.playerTrim, { pos: [0, 0.0005, 0], mirrorX: true });
-  // canards
-  b.add(wing([[0.004, -0.024], [0.0135, -0.019], [0.0125, -0.016], [0.004, -0.018]], 0.0011), C.playerHull, { mirrorX: true });
-  // wingtip cannons
-  b.add(taper(0.0016, 0.0012, 0.03, 6), C.playerDark, { pos: [0.034, -0.0012, 0.004], mirrorX: true });
-  b.add(new THREE.SphereGeometry(0.0013, 6, 4), C.playerGlow, { pos: [0.034, -0.0012, -0.011], glow: true, mirrorX: true });
-  // engine pods
-  b.add(taper(0.0042, 0.0034, 0.022, 8), C.playerTrim, { pos: [0.0105, -0.0012, 0.021], mirrorX: true });
-  b.add(new THREE.CylinderGeometry(0.0032, 0.0032, 0.0012, 10).rotateX(Math.PI / 2), C.playerGlow, { pos: [0.0105, -0.0012, 0.0325], glow: true, mirrorX: true });
+  const gun = 0x2c313b, dark = 0x15181e, plate = 0x9a9ea8, maroon = 0x6a2430, cyan = 0x47f0ff;
+  // fuselage: faceted wedge
+  b.add(taper(0.019, 0.006, 0.075, 6), gun, { pos: [0, 0, -0.006], scale: [1.35, 0.55, 1] });
+  b.add(taper(0.015, 0.019, 0.022, 6), dark, { pos: [0, 0, 0.041], scale: [1.35, 0.55, 1] });
+  // armoured dorsal plates
+  b.add(taper(0.012, 0.004, 0.05, 4), plate, { pos: [0, 0.0085, -0.004], scale: [1.4, 0.45, 1] });
+  b.add(new THREE.BoxGeometry(0.03, 0.005, 0.022), plate, { pos: [0, 0.007, 0.03] });
+  // cockpit
+  b.add(new THREE.SphereGeometry(0.0075, 10, 8), cyan, { pos: [0, 0.009, -0.022], scale: [0.8, 0.5, 1.8], glow: true });
+  // chin cannons
+  b.add(taper(0.003, 0.0022, 0.03, 6), dark, { pos: [0.011, -0.007, -0.04], mirrorX: true });
+  b.add(new THREE.SphereGeometry(0.0022, 6, 4), cyan, { pos: [0.011, -0.007, -0.056], glow: true, mirrorX: true });
+  // pylons out to the turbines
+  b.add(new THREE.BoxGeometry(0.03, 0.006, 0.018), gun, { pos: [0.028, -0.002, 0.01], rot: [0, 0, -0.08], mirrorX: true });
+  b.add(wing([[0.012, 0.03], [0.05, 0.034], [0.058, 0.02], [0.02, -0.01]], 0.0022), dark, { pos: [0, -0.004, 0], mirrorX: true });
+  // ring turbines: axis along Z, so you look straight into their glowing cores from behind
+  for (const sx of [-1, 1]) {
+    const [x, y, z] = [0.047 * sx, -0.002, 0.012];
+    b.add(new THREE.TorusGeometry(0.021, 0.0062, 8, 24), maroon, { pos: [x, y, z] });
+    b.add(new THREE.TorusGeometry(0.021, 0.0035, 6, 24), plate, { pos: [x, y, z - 0.006] });
+    b.add(new THREE.CylinderGeometry(0.016, 0.016, 0.004, 20).rotateX(Math.PI / 2), dark, { pos: [x, y, z - 0.002] });
+    for (let i = 0; i < 6; i++) {
+      const blade = new THREE.BoxGeometry(0.0035, 0.015, 0.0015);
+      blade.translate(0, 0.008, 0);
+      blade.rotateZ((i / 6) * Math.PI * 2);
+      blade.rotateY(0.4);
+      b.add(blade, plate, { pos: [x, y, z - 0.004] });
+    }
+    b.add(new THREE.CylinderGeometry(0.0145, 0.0145, 0.0012, 20).rotateX(Math.PI / 2), cyan, { pos: [x, y, z + 0.003], glow: true });
+    b.add(new THREE.CylinderGeometry(0.006, 0.006, 0.0016, 12).rotateX(Math.PI / 2), 0xffffff, { pos: [x, y, z + 0.0035], glow: true });
+    // fin above each turbine
+    b.add(wing([[0, -0.008], [0.013, 0.002], [0.013, 0.012], [0, 0.018]], 0.0018), plate, { pos: [x, y + 0.024, z], rot: [0, 0, Math.PI / 2] });
+  }
   // tail fins
-  b.add(wing([[0.0, 0.016], [0.0, 0.032], [0.0016, 0.032], [0.0016, 0.02]], 0.0012), C.playerHull, { pos: [0.009, 0.0035, 0], rot: [0, 0, -1.2], mirrorX: true });
-  return b.build({ metalness: 0.35, roughness: 0.28, envIntensity: 1.25 });
+  b.add(wing([[0.0, 0.02], [0.0, 0.05], [0.0022, 0.05], [0.0022, 0.03]], 0.0016), gun, { pos: [0.012, 0.006, 0], rot: [0, 0, -1.05], mirrorX: true });
+  return b.build({ metalness: 0.55, roughness: 0.32, envIntensity: 1.3 });
 }
 
 /** Gradius-style "option" drone */
@@ -281,58 +298,138 @@ export function debrisGeometry() {
 
 export function gyreCore() {
   const b = new ModelBuilder();
-  b.add(new THREE.IcosahedronGeometry(0.1, 2), 0xffe2f6, { glow: true });
+  b.add(new THREE.IcosahedronGeometry(0.12, 2), 0xe6fdff, { glow: true });
   return b.build();
 }
 
-/** Spherical armoured shell around the core with an aperture cut out around +Z. */
-export function gyreShell(radius = 0.17, apertureHalfAngle = 0.55) {
-  const C = PALETTE;
-  const ico = new THREE.IcosahedronGeometry(radius, 2);
-  const src = ico.index ? ico.toNonIndexed() : ico;
-  const pos = src.getAttribute('position');
-  const keepPlates = [], keepCap = [];
-  const v = new THREE.Vector3();
-  const cosA = Math.cos(apertureHalfAngle);
-  for (let i = 0; i < pos.count; i += 3) {
-    v.set(0, 0, 0);
-    for (let k = 0; k < 3; k++) v.x += pos.getX(i + k), v.y += pos.getY(i + k), v.z += pos.getZ(i + k);
-    v.normalize();
-    const tri = [];
-    for (let k = 0; k < 3; k++) tri.push(pos.getX(i + k), pos.getY(i + k), pos.getZ(i + k));
-    (v.z > cosA ? keepCap : keepPlates).push(tri);
+/** Radial star-burst texture for blinding light sources. */
+let flareTex = null;
+export function flareTexture() {
+  if (flareTex) return flareTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.12, 'rgba(220,255,255,0.95)');
+  g.addColorStop(0.3, 'rgba(90,220,255,0.35)');
+  g.addColorStop(1, 'rgba(40,120,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 + (i % 2) * 0.13;
+    const len = i % 3 === 0 ? 126 : 80;
+    ctx.save();
+    ctx.translate(128, 128);
+    ctx.rotate(a);
+    const lg = ctx.createLinearGradient(0, 0, len, 0);
+    lg.addColorStop(0, 'rgba(255,255,255,0.9)');
+    lg.addColorStop(1, 'rgba(120,230,255,0)');
+    ctx.fillStyle = lg;
+    ctx.beginPath();
+    ctx.moveTo(0, -3);
+    ctx.lineTo(len, 0);
+    ctx.lineTo(0, 3);
+    ctx.fill();
+    ctx.restore();
   }
-  const mk = (tris, scale) => {
-    const arr = new Float32Array(tris.length * 9);
-    tris.forEach((t, j) => {
-      // shrink each triangle toward its centroid to read as separate armour plates
-      const cx = (t[0] + t[3] + t[6]) / 3, cy = (t[1] + t[4] + t[7]) / 3, cz = (t[2] + t[5] + t[8]) / 3;
-      for (let k = 0; k < 3; k++) {
-        arr[j * 9 + k * 3] = cx + (t[k * 3] - cx) * scale;
-        arr[j * 9 + k * 3 + 1] = cy + (t[k * 3 + 1] - cy) * scale;
-        arr[j * 9 + k * 3 + 2] = cz + (t[k * 3 + 2] - cz) * scale;
-      }
-    });
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
-    g.computeVertexNormals();
-    return g;
-  };
+  flareTex = new THREE.CanvasTexture(c);
+  flareTex.colorSpace = THREE.SRGBColorSpace;
+  return flareTex;
+}
+
+/**
+ * Hexagonal armour plates covering a sphere (the dual of a geodesic icosphere: hexagons plus
+ * twelve pentagons). Each plate is a raised tile with a glowing red seam around it and a
+ * raised, red-outlined centre boss. Plates within `apertureHalfAngle` of +Z become the cap.
+ */
+export function hexPlates(radius, { detail = 2, apertureHalfAngle = 0, thickness = 0.012, plateColor = PALETTE.bossPlate, seamColor = PALETTE.bossSeam } = {}) {
+  let ico = new THREE.IcosahedronGeometry(1, detail);
+  ico.deleteAttribute('normal');
+  ico.deleteAttribute('uv');
+  ico = mergeVertices(ico, 1e-4);
+  const pos = ico.getAttribute('position');
+  const index = ico.index.array;
+  const verts = [];
+  for (let i = 0; i < pos.count; i++) verts.push(new THREE.Vector3().fromBufferAttribute(pos, i));
+  const centroids = [];
+  const around = verts.map(() => []);
+  for (let f = 0; f < index.length / 3; f++) {
+    const [a, b, c] = [index[f * 3], index[f * 3 + 1], index[f * 3 + 2]];
+    centroids.push(new THREE.Vector3().add(verts[a]).add(verts[b]).add(verts[c]).normalize());
+    around[a].push(f); around[b].push(f); around[c].push(f);
+  }
   const shell = new ModelBuilder();
-  shell.add(mk(keepPlates, 0.9), C.bossMetal);
-  // dark inner layer so gaps between plates read as depth
-  shell.add(new THREE.IcosahedronGeometry(radius * 0.93, 1), C.bossDark);
-  // glowing seams around the aperture rim
-  const rim = new THREE.TorusGeometry(radius * Math.sin(apertureHalfAngle) * 1.02, 0.007, 6, 28);
-  rim.translate(0, 0, radius * Math.cos(apertureHalfAngle));
-  shell.add(rim, PALETTE.enemyGlow, { glow: true });
-  const shellGroup = shell.build({ metalness: 0.75, roughness: 0.28, unique: true });
   const cap = new ModelBuilder();
-  cap.add(mk(keepCap, 0.92), C.bossGold);
-  cap.add(new THREE.CylinderGeometry(0.02, 0.03, 0.03, 6).rotateX(Math.PI / 2), C.bossDark, { pos: [0, 0, radius + 0.005] });
-  cap.add(new THREE.SphereGeometry(0.012, 8, 6), PALETTE.enemyHot, { pos: [0, 0, radius + 0.02], glow: true });
-  const capGroup = cap.build({ metalness: 0.8, roughness: 0.25, unique: true });
-  return { shell: shellGroup, cap: capGroup };
+  const cosA = Math.cos(apertureHalfAngle);
+  const tmp = new THREE.Vector3(), t1 = new THREE.Vector3(), t2 = new THREE.Vector3();
+  const plates = [];
+  verts.forEach((v, vi) => {
+    // sort surrounding face centroids around the vertex normal
+    t1.set(0, 1, 0);
+    if (Math.abs(v.y) > 0.9) t1.set(1, 0, 0);
+    t1.crossVectors(v, t1).normalize();
+    t2.crossVectors(v, t1);
+    const ring = around[vi].map((f) => centroids[f]).sort((p, q) => Math.atan2(p.dot(t2), p.dot(t1)) - Math.atan2(q.dot(t2), q.dot(t1)));
+    plates.push({ v, ring });
+  });
+  const tri = (arr, a, b, c) => arr.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  for (const { v, ring } of plates) {
+    const target = apertureHalfAngle > 0 && v.z > cosA ? cap : shell;
+    const n = ring.length;
+    const at = (p, inset, r) => tmp.copy(v).lerp(p, inset).normalize().multiplyScalar(r).clone();
+    const R0 = radius * 0.985, R1 = radius + thickness, R2 = radius + thickness * 1.6;
+    const top = [], seam = [], base = [], bossOut = [], bossIn = [], bossTop = [];
+    for (const p of ring) {
+      base.push(at(p, 0.9, R0));
+      top.push(at(p, 0.86, R1));
+      seam.push(at(p, 0.97, R0 * 1.004));
+      bossOut.push(at(p, 0.56, R1 * 1.0005));
+      bossIn.push(at(p, 0.48, R2));
+      bossTop.push(at(p, 0.44, R2));
+    }
+    const cTop = v.clone().multiplyScalar(R2);
+    const hull = [], plateTop = [], glow = [];
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      // plate sides
+      tri(hull, base[i], base[j], top[j]); tri(hull, base[i], top[j], top[i]);
+      // plate top ring (between outline and boss)
+      tri(plateTop, top[i], top[j], bossOut[j]); tri(plateTop, top[i], bossOut[j], bossOut[i]);
+      // boss bevel and top
+      tri(hull, bossOut[i], bossOut[j], bossIn[j]); tri(hull, bossOut[i], bossIn[j], bossIn[i]);
+      tri(plateTop, bossTop[i], bossTop[j], cTop);
+      // glowing seam in the gap between plates, and a thin red outline on the boss
+      tri(glow, seam[i], seam[j], base[j]); tri(glow, seam[i], base[j], base[i]);
+      tri(glow, bossIn[i], bossIn[j], bossTop[j]); tri(glow, bossIn[i], bossTop[j], bossTop[i]);
+    }
+    const mk = (arr) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+      g.computeVertexNormals();
+      return g;
+    };
+    target.add(mk(hull), PALETTE.bossDark);
+    target.add(mk(plateTop), plateColor);
+    target.add(mk(glow), seamColor, { glow: true });
+  }
+  return { shell, cap };
+}
+
+/** The Gyre's armoured shell: hex plates around a glowing inner layer, with a cap over +Z. */
+export function gyreShell(radius = 0.2, apertureHalfAngle = 0.42) {
+  const { shell, cap } = hexPlates(radius, { detail: 2, apertureHalfAngle, thickness: 0.011 });
+  // hot inner layer that shows through the seams
+  shell.add(new THREE.IcosahedronGeometry(radius * 0.97, 2), 0x5a0814, { glow: true });
+  const rim = new THREE.TorusGeometry(radius * Math.sin(apertureHalfAngle) * 1.02, 0.008, 6, 32);
+  rim.translate(0, 0, radius * Math.cos(apertureHalfAngle));
+  shell.add(rim, 0x7af6ff, { glow: true });
+  cap.add(new THREE.SphereGeometry(0.022, 12, 8), 0xff2244, { pos: [0, 0, radius + 0.02], glow: true });
+  return {
+    shell: shell.build({ metalness: 0.8, roughness: 0.3, unique: true, envIntensity: 1.4 }),
+    cap: cap.build({ metalness: 0.8, roughness: 0.3, unique: true, envIntensity: 1.4 }),
+  };
 }
 
 /** A segmented ring (torus in XY plane, axis Z) with greebles. */

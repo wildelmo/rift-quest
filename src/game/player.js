@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Billboards, SHAPE } from '../engine/billboards.js';
 import { clamp, rand } from '../engine/math.js';
-import { buildPlayerShip, buildOption } from './models.js';
+import { buildPlayerShip, buildOption, SHIP_TURBINES } from './models.js';
 import { COLORS } from './fx.js';
 
 // The player's ship. Its pose is the controller pose, one-to-one, every frame - no smoothing.
@@ -10,7 +10,7 @@ export const SHIP = {
   hitRadius: 0.0055,
   grazeRadius: 0.03,
   fireRate: 14,
-  boltSpeed: 3.6,
+  boltSpeed: 5.2,
   chargeTime: 1.1,
   maxOptions: 3,
   maxLevel: 4,
@@ -37,6 +37,105 @@ void main() {
   gl_FragColor = vec4(col * a, a * 0.7);
 }
 `;
+
+const trailVert = /* glsl */ `
+attribute float aAge;
+attribute float aSide;
+varying float vAge;
+varying float vSide;
+void main() { vAge = aAge; vSide = aSide; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+`;
+const trailFrag = /* glsl */ `
+uniform vec3 uColor;
+varying float vAge;
+varying float vSide;
+void main() {
+  float across = 1.0 - abs(vSide);
+  float a = pow(1.0 - vAge, 1.6) * smoothstep(0.0, 0.6, across);
+  vec3 col = mix(uColor, vec3(1.0), pow(across, 6.0) * (1.0 - vAge));
+  gl_FragColor = vec4(col * a, a * 0.35);
+}
+`;
+
+/** Camera-facing ribbon that streams behind a turbine and shows the path your hand took. */
+export class Trail {
+  constructor(parent, { length = 0.32, width = 0.016, color = [0.3, 0.9, 1], max = 48 } = {}) {
+    this.length = length;
+    this.width = width;
+    this.max = max;
+    this.pts = [];
+    const n = max * 2;
+    this.positions = new Float32Array(n * 3);
+    this.ages = new Float32Array(n);
+    const sides = new Float32Array(n);
+    for (let i = 0; i < max; i++) { sides[i * 2] = -1; sides[i * 2 + 1] = 1; }
+    const idx = [];
+    for (let i = 0; i < max - 1; i++) {
+      const a = i * 2;
+      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.positions, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aAge', new THREE.BufferAttribute(this.ages, 1).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aSide', new THREE.BufferAttribute(sides, 1));
+    g.setIndex(idx);
+    g.setDrawRange(0, 0);
+    this.geometry = g;
+    this.mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({
+      vertexShader: trailVert, fragmentShader: trailFrag, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      uniforms: { uColor: { value: new THREE.Color(...color) } },
+      blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+    }));
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 9;
+    parent.add(this.mesh);
+    this.view = new THREE.Vector3(0, 0.3, 0.45);
+    this._t = new THREE.Vector3();
+    this._d = new THREE.Vector3();
+    this._s = new THREE.Vector3();
+  }
+
+  push(p, time, emitting) {
+    const pts = this.pts;
+    if (emitting) {
+      const last = pts[pts.length - 1];
+      if (!last || last.p.distanceToSquared(p) > 0.000004 || time - last.t > 0.02) pts.push({ p: p.clone(), t: time });
+      else { last.p.copy(p); last.t = time; }
+    }
+    while (pts.length && (time - pts[0].t > this.length || pts.length > this.max)) pts.shift();
+    this.time = time;
+  }
+
+  render() {
+    const pts = this.pts;
+    const n = pts.length;
+    if (n < 2) { this.geometry.setDrawRange(0, 0); return; }
+    for (let i = 0; i < n; i++) {
+      const a = pts[Math.max(0, i - 1)].p, b = pts[Math.min(n - 1, i + 1)].p;
+      this._t.subVectors(b, a);
+      const p = pts[i].p;
+      this._d.subVectors(p, this.view);
+      this._s.crossVectors(this._t, this._d).normalize();
+      const age = Math.min(1, (this.time - pts[i].t) / this.length);
+      const w = this.width * (1 - age * 0.7);
+      for (const k of [0, 1]) {
+        const j = (i * 2 + k) * 3;
+        const sg = k ? 1 : -1;
+        this.positions[j] = p.x + this._s.x * w * sg;
+        this.positions[j + 1] = p.y + this._s.y * w * sg;
+        this.positions[j + 2] = p.z + this._s.z * w * sg;
+        this.ages[i * 2 + k] = age;
+      }
+    }
+    this.geometry.attributes.position.needsUpdate = true;
+    this.geometry.attributes.aAge.needsUpdate = true;
+    this.geometry.setDrawRange(0, (n - 1) * 6);
+  }
+
+  clear() {
+    this.pts.length = 0;
+  }
+}
 
 export class PlayerShots {
   constructor(parent) {
@@ -97,7 +196,8 @@ export class PlayerShots {
       } else if (s.kind === 'missile') {
         b.push(s.x, s.y, s.z, 0.006, 1, 0.75, 0.3, 1, SHAPE.BOLT, 0.2, s.vx, s.vy, s.vz, 0.02);
       } else {
-        b.push(s.x, s.y, s.z, s.size, r, g, bl, 1, SHAPE.BOLT, 0.15, s.vx, s.vy, s.vz, 0.03);
+        b.push(s.x, s.y, s.z, s.size * 2.6, r, g, bl, 0.45, SHAPE.GLOW, 0.85, s.vx, s.vy, s.vz, 0.05);
+        b.push(s.x, s.y, s.z, s.size, r, g, bl, 1, SHAPE.BOLT, 0.3, s.vx, s.vy, s.vz, 0.06);
       }
     }
     b.end();
@@ -129,7 +229,7 @@ export class Ship {
 
     // Shield bubble
     this.shieldMesh = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.052, 1),
+      new THREE.IcosahedronGeometry(0.085, 1),
       new THREE.MeshBasicMaterial({ color: 0x55ddff, wireframe: true, transparent: true, opacity: 0.5, toneMapped: false, depthWrite: false }),
     );
     this.shieldMesh.visible = false;
@@ -149,9 +249,10 @@ export class Ship {
     const a2 = new THREE.Mesh(aimGeo, this.aimMat);
     a2.rotation.z = Math.PI / 2;
     this.aim.add(a1, a2);
-    this.aim.position.set(0, 0, -0.045);
+    this.aim.position.set(0, -0.004, -0.062);
     this.group.add(this.aim);
 
+    this.trails = SHIP_TURBINES.map(() => new Trail(parent));
     this.options = [];
     this.optionModels = [];
     for (let i = 0; i < SHIP.maxOptions; i++) {
@@ -187,6 +288,7 @@ export class Ship {
     this.held = false;
     this.history.length = 0;
     this.time = 0;
+    if (this.trails) for (const t of this.trails) t.clear();
     if (this.chargeSound) { this.chargeSound.stop(); this.chargeSound = null; }
   }
 
@@ -244,6 +346,8 @@ export class Ship {
       this.deadTimer -= dt;
       this.group.visible = false;
       for (const m of this.optionModels) m.visible = false;
+      this._engineFx(dt);
+      this._renderTrails(ctx);
       return;
     }
     this.group.visible = !(this.invuln > 0 && Math.floor(this.time * 18) % 2 === 0);
@@ -319,25 +423,31 @@ export class Ship {
     this.aimMat.uniforms.uTime.value = this.time;
     this.aimMat.uniforms.uAlpha.value = this.held ? 0.75 : 0.0;
     this._engineFx(dt);
+    this._renderTrails(ctx);
+  }
+
+  _renderTrails(ctx) {
+    for (const t of this.trails) {
+      if (ctx.headLocal) t.view.copy(ctx.headLocal);
+      t.render();
+    }
   }
 
   nosePoint(out) {
-    return out.set(0, 0, -0.05).applyQuaternion(this.quat).add(this.pos);
+    return out.set(0, -0.004, -0.068).applyQuaternion(this.quat).add(this.pos);
   }
 
   _engineFx(dt) {
-    if (!this.group.visible) return;
+    const visible = this.group.visible;
     const speed = this.vel.length();
-    const fx = this.fx;
-    for (const sx of [-1, 1]) {
-      _v.set(0.0105 * sx, -0.0012, 0.034).applyQuaternion(this.quat).add(this.pos);
+    SHIP_TURBINES.forEach(([x, y, z], i) => {
+      _v.set(x, y, z + 0.006).applyQuaternion(this.quat).add(this.pos);
+      this.trails[i].push(_v, this.time, visible);
+      if (!visible) return;
       _v2.set(0, 0, 1).applyQuaternion(this.quat);
-      const len = 0.25 + Math.min(speed, 1.5) * 0.4;
-      fx.spawn({ x: _v.x, y: _v.y, z: _v.z, vx: _v2.x * len, vy: _v2.y * len, vz: _v2.z * len, life: 0.06, size: 0.006, size1: 0.002, color: COLORS.white, color1: COLORS.cyan, shape: SHAPE.SPARK, additive: 0.8, stretch: 0.05 });
-    }
-    if (speed > 0.6 && Math.random() < 0.5) {
-      fx.spawn({ x: this.pos.x, y: this.pos.y, z: this.pos.z, life: 0.3, size: 0.004, size1: 0.001, color: COLORS.cyan, shape: SHAPE.GLOW, additive: 0.8 });
-    }
+      const len = 0.3 + Math.min(speed, 1.5) * 0.3;
+      this.fx.spawn({ x: _v.x, y: _v.y, z: _v.z, vx: _v2.x * len, vy: _v2.y * len, vz: _v2.z * len, life: 0.07, size: 0.018, size1: 0.006, color: COLORS.white, color1: COLORS.cyan, shape: SHAPE.GLOW, additive: 0.85 });
+    });
   }
 
   _bolt(localX, localY, localZ, dir, dmg, size = 0.0065, color = COLORS.cyan) {
@@ -351,15 +461,15 @@ export class Ship {
     const dir = ctx.aimAssist ? ctx.aimAssist(this.pos, fwd) : fwd;
     const L = this.level;
     const dmg = L >= 4 ? 1.35 : 1;
-    const size = L >= 4 ? 0.0085 : 0.0065;
-    this._bolt(0.034, -0.0012, -0.014, dir, dmg, size);
-    this._bolt(-0.034, -0.0012, -0.014, dir, dmg, size);
+    const size = L >= 4 ? 0.012 : 0.009;
+    this._bolt(0.011, -0.007, -0.058, dir, dmg, size);
+    this._bolt(-0.011, -0.007, -0.058, dir, dmg, size);
     if (L >= 2) {
       const up = _v2.set(0, 1, 0).applyQuaternion(this.quat);
       const angles = L >= 4 ? [0.12, -0.12, 0.24, -0.24] : [0.12, -0.12];
       for (const a of angles) {
         const d = dir.clone().applyAxisAngle(up, a);
-        this._bolt(0, 0, -0.04, d, 0.7, 0.0055, COLORS.blue);
+        this._bolt(0, -0.004, -0.06, d, 0.7, 0.007, COLORS.blue);
       }
     }
     for (let i = 0; i < this.optionCount; i++) {

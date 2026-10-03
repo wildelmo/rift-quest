@@ -10,6 +10,7 @@ import { Gyre } from './boss.js';
 import { Hud, fmt } from './hud.js';
 import { stage, WAVES } from './stage.js';
 import { PALETTE } from './models.js';
+import { Screens } from './screens.js';
 
 // The game: state machine, collision resolution, scoring and feedback (sound, haptics,
 // hit-stop, flashes). Everything gameplay-related lives in arena-local space.
@@ -21,7 +22,7 @@ const _q2 = new THREE.Quaternion();
 const _m = new THREE.Matrix4();
 
 // Ship sits just above and ahead of the controller, like a toy held in the fist.
-export const GRIP_OFFSET = new THREE.Vector3(0, 0.042, -0.025);
+export const GRIP_OFFSET = new THREE.Vector3(0, 0.055, -0.03);
 const EXTENDS = [400000, 1200000];
 
 let hiScoreMem = 0;
@@ -55,6 +56,8 @@ export class Game {
     this.targets = [];
     this.boss = null;
     this.hud = new Hud(this);
+    this.screens = new Screens(room);
+    room.onLayout = () => this.screens.layout();
     this.headWorld = new THREE.Vector3(0, 1.6, 0);
     this.headLocal = new THREE.Vector3(0, 0.28, 0.4);
     this.state = 'title';
@@ -124,6 +127,8 @@ export class Game {
     this.ship.setPose(this.restPose.pos, this.restPose.quat);
     this.hud.showPanel('title', { hiScore: this.hiScore });
     this.waveLabel = '';
+    this.screens.setOn(0);
+    this.room.dimTarget = 0.15;
     this.music.ctx && this.music.play('stage', 'title');
   }
 
@@ -168,6 +173,10 @@ export class Game {
     this.state = 'playing';
     this.pauseScale = 1;
     this.hud.hidePanel();
+    // lights down: the room dims and your walls power up into arena screens
+    this.room.dimTarget = 0.5;
+    this.screens.setOn(1);
+    this.screens.setMode('wave');
     this.waveIndex = fromWave;
     this.music.play('stage', 'build');
     this.boss = new Gyre(this);
@@ -185,6 +194,8 @@ export class Game {
     this.waveLabel = `WAVE ${w.id}`;
     this.waveHit = false;
     this.hud.showBanner(`WAVE ${w.id}`, w.name, 'wave', 2.4);
+    this.screens.setMode('wave');
+    this.screens.announce(`WAVE ${w.id}`, w.name, 4);
     this.sfx.play('ui', null, { vol: 0.8 });
     this.music.arrange(w.id >= 3 ? 'waveLead' : 'wave');
     if (w.id === 1) {
@@ -204,6 +215,8 @@ export class Game {
     this.hud.showBanner(`WAVE ${w.id} CLEAR`, this.waveHit ? `BONUS ${fmt(bonus)}` : `NO DAMAGE  ·  BONUS ${fmt(bonus)}`, 'clear', 3.2);
     this.music.jingle('clear');
     this.music.arrange('breather');
+    this.screens.setMode('clear');
+    this.screens.announce('CLEAR', `BONUS ${fmt(bonus)}`, 4);
     this.closeRifts();
     this.bullets.cancelAll(true);
     // a reward drifts out of the front rift during the breather
@@ -222,7 +235,9 @@ export class Game {
     this.waveLabel = 'WARNING';
     this.hud.showBanner('WARNING', 'A HUGE RIFT SIGNATURE IS APPROACHING', 'warning', 5);
     this.music.arrange('bossIntro');
-    this.room.dimTarget = 0.62;
+    this.room.dimTarget = 0.78;
+    this.screens.setMode('warning');
+    this.screens.announce('WARNING', 'HUGE SIGNATURE', 5.5);
     this.closeRifts(['boss']);
     this.room.rifts.boss.setOpen(1);
     this.scheduler.start((function* (g) {
@@ -239,6 +254,8 @@ export class Game {
     this.waveLabel = 'THE GYRE';
     this.hud.showBanner('THE GYRE', 'RIFT SENTINEL  ·  DESTROY THE CROWN', 'boss', 3);
     this.music.play('boss', 'boss');
+    this.screens.setMode('boss');
+    this.screens.announce('THE GYRE', 'RIFT SENTINEL', 3);
     this.room.rifts.boss.setOpen(0.55);
   }
 
@@ -286,7 +303,8 @@ export class Game {
   onBossExploded(pos) {
     this.slowmoTarget = 1;
     this.room.flashView(1.2);
-    this.room.dimTarget = 0;
+    this.room.dimTarget = 0.35;
+    this.screens.setMode('clear');
     this.closeRifts();
     this.sfx.play('bigboom', this.worldPos(pos), { vol: 1.6, reverb: 0.9 });
     this.haptic(1.0, 700, 'both');
@@ -319,6 +337,8 @@ export class Game {
       ],
     });
     this.music.jingle('victory');
+    this.screens.setMode('clear');
+    this.screens.announce('STAGE CLEAR', `SCORE ${fmt(this.score)}`, 600);
     this.music.play('stage', 'title');
     this.scheduler.start((function* (g) {
       yield 1.5;
@@ -345,7 +365,9 @@ export class Game {
     if (this.stageTask) this.stageTask.cancel();
     if (this.boss) this.boss._newOwner(); // the sentinel stops firing at the wreck
     this.closeRifts();
-    this.room.dimTarget = 0;
+    this.room.dimTarget = 0.35;
+    this.screens.setMode('idle');
+    this.screens.announce('GAME OVER', '', 600);
     this.music.jingle('gameover');
     this.music.play('stage', 'title');
     this.lasers.clear();
@@ -621,6 +643,7 @@ export class Game {
       aimAssist: (o, d) => this.aimAssist(o, d),
       haptic: (i, ms) => this.haptic(i, ms),
       headWorld: this.headWorld,
+      headLocal: this.headLocal,
     };
     const heldInput = this.heldHand ? frame.hands[this.heldHand] : null;
     ship.update(dt, { trigger: !!(heldInput && heldInput.trigger > 0.5) }, shipCtx);
@@ -710,6 +733,7 @@ export class Game {
     }
 
     this.fx.update(dt);
+    this.screens.update(realDt);
     this.room.update(realDt * (this.options.speed || 1), ship.pos, this.state === 'playing' || this.state === 'paused');
 
     // grab halo (when the ship is waiting to be picked up)

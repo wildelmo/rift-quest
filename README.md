@@ -2,8 +2,10 @@
 
 A mixed-reality bullet hell for Meta Quest 3. It takes the hand-held ship from Xortex (Valve's
 *The Lab*) and mixes in Gradius and R-Type. Passthrough stays on and your room is the arena:
-rifts tear open in your real walls and ceiling, wreckage bounces on your real floor and tables,
-and a giant sentinel pushes out through the wall in front of you.
+when you grab the ship the room lights go down and your real walls power up into giant hex LED
+screens. Rifts tear open in your walls and ceiling, enemies fight beside and above you, glowing
+red energy balls fill the room, wreckage bounces on your real floor and tables, and an armoured
+hex-plated sentinel pushes out through the wall in front of you.
 
 **Stage 1 — "Living Room Breach":** four short waves with breathers between them, then the boss,
 **THE GYRE**.
@@ -93,6 +95,7 @@ src/
     bullets.js       enemy bullets, lasers, score stars
     patterns.js      pure bullet-pattern geometry (fans, cones, shells)
     room.js          arena placement, detected walls/tables, rifts, deck, dimmer
+    screens.js       hex dot-matrix LED screens hung on your walls
     hud.js           in-headset UI
     models.js        procedural models
     fx.js            particles and debris

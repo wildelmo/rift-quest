@@ -244,7 +244,7 @@ export class Room {
       } else {
         const pos = dir.clone().multiplyScalar(s.dist);
         // ceiling: also try to stay under the real ceiling height
-        if (name === 'ceiling') pos.y = Math.min(pos.y, -this.floorY + 2.3 - 0.05);
+        if (name === 'ceiling') pos.y = Math.min(pos.y, this.floorY + 2.3 - 0.05);
         const normal = pos.clone().negate().normalize();
         rift.place(pos, normal, false);
       }
@@ -254,6 +254,7 @@ export class Room {
         if (d < 1.9) rift.place(rift.position.clone().setLength(1.9), rift.normal, rift.onWall);
       }
     }
+    this.onLayout && this.onLayout();
   }
 
   _buildDeck() {

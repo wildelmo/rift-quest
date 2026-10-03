@@ -16,11 +16,11 @@ export const COLORS = {
   pink: [1, 0.45, 0.8],
   orange: [1, 0.55, 0.1],
   amber: [1, 0.75, 0.2],
-  red: [1, 0.15, 0.2],
+  red: [1, 0.09, 0.2],
   violet: [0.65, 0.3, 1],
   gold: [1, 0.85, 0.35],
   green: [0.4, 1, 0.5],
-  smoke: [0.08, 0.07, 0.09],
+  smoke: [0.32, 0.46, 0.5],
 };
 
 class Particle {
