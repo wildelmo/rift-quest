@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#05060f" />
+    <title>RIFT — Mixed Reality Bullet Hell</title>
+    <link rel="icon" href="./favicon.svg" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="overlay">
+      <div class="card">
+        <div class="logo">RIFT</div>
+        <div class="tag">Your room is the arena. Your hand is the ship.</div>
+        <p class="blurb">
+          A mixed-reality bullet hell for Meta Quest 3. Rifts tear open in your walls, swarms pour
+          through your living room, and a colossal gyroscope sentinel waits at the end of Stage 1.
+        </p>
+        <div class="buttons">
+          <button id="btn-ar" disabled>Enter Mixed Reality</button>
+          <button id="btn-vr" class="secondary" disabled>Enter VR</button>
+          <button id="btn-desktop" class="secondary">Preview in browser</button>
+        </div>
+        <div id="xr-status" class="status">Checking for a headset…</div>
+        <div class="controls">
+          <div><b>Grip</b> hold the ship — it follows your hand 1:1</div>
+          <div><b>Nose</b> auto-fire goes where the ship points</div>
+          <div><b>Trigger</b> hold to charge, release for a wave blast</div>
+          <div><b>A / X</b> or off-hand trigger: singularity bomb</div>
+          <div><b>Let go</b> pause · <b>Stick click</b> recentre</div>
+        </div>
+      </div>
+    </div>
+    <div id="desktop-help" class="hidden">
+      Click to grab · move mouse to fly · wheel = depth · hold click = charge · Space / right-click = bomb · Esc = let go · R = recentre
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

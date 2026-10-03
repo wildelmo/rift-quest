@@ -1,0 +1,46 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { chooseCapsule } from '../src/game/enemies.js';
+import { WAVES } from '../src/game/stage.js';
+import { BOSS_HP, APERTURE_HIT_ANGLE, EYE_CONE } from '../src/game/boss.js';
+import { SHIP } from '../src/game/player.js';
+import { RIFT_SLOTS } from '../src/game/room.js';
+
+test('capsules never offer upgrades the ship cannot take', () => {
+  const maxed = { level: 4, optionCount: 3, shield: true, bombs: 9 };
+  for (let i = 0; i < 200; i++) assert.equal(chooseCapsule(maxed, () => i / 200), 'B');
+  const fresh = { level: 1, optionCount: 0, shield: false, bombs: 3 };
+  const counts = {};
+  for (let i = 0; i < 1000; i++) {
+    const k = chooseCapsule(fresh, () => (i + 0.5) / 1000);
+    counts[k] = (counts[k] || 0) + 1;
+  }
+  // a fresh ship mostly gets power and options
+  assert.ok(counts.P > counts.S && counts.O > counts.S);
+});
+
+test('stage has four authored waves before the boss', () => {
+  assert.equal(WAVES.length, 4);
+  for (const w of WAVES) {
+    assert.equal(typeof w.script, 'function');
+    assert.ok(w.name.length > 0);
+  }
+});
+
+test('boss tuning stays in sane bounds', () => {
+  assert.ok(BOSS_HP.pod > 0 && BOSS_HP.emitter > BOSS_HP.pod && BOSS_HP.core > BOSS_HP.emitter);
+  // the hit window through the aperture should be roughly the size of the safe eye
+  assert.ok(APERTURE_HIT_ANGLE > EYE_CONE && APERTURE_HIT_ANGLE < EYE_CONE * 2);
+});
+
+test('ship hitbox is tiny compared with graze radius', () => {
+  assert.ok(SHIP.hitRadius < 0.01);
+  assert.ok(SHIP.grazeRadius > SHIP.hitRadius * 3);
+});
+
+test('every rift slot has a direction, fallback distance and radius', () => {
+  for (const s of Object.values(RIFT_SLOTS)) {
+    assert.equal(s.dir.length, 3);
+    assert.ok(s.dist > 1 && s.radius > 0);
+  }
+});
