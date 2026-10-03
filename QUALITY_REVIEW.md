@@ -36,3 +36,7 @@ The reviewer inspected actual scene captures and sequential frames from the fina
 | Pacing and encounter pass | 6.5–7/10 | Controlled attack windows and distinct bosses; art and output verification remained weak. |
 | Sculpted art, staged destruction, PCM audio | 8.5/10 | Strong finish; repeated flybys and insufficient phase identities held the score back. |
 | Bespoke spatial set pieces and authored boss phases | 9.0/10, provisional | Distinct visual identity, coherent phase choreography, protected reading beats, measured busy mix, and verified motion/lifecycle. |
+
+## Subsequent pause and shutdown update
+
+The 9.0 assessment above applies to the preceding art/combat revision; it is not a new grade for this menu update. Added saved volume/music/difficulty controls, an in-headset controller menu, and complete audio/rendering cleanup on Exit or system XR end. Arcade retains the reviewed balance. All 24 simulation/menu checks, isolated browser lifecycle checks, and desktop render checks pass. Simulated XR transport verifies controller/session code paths; on-headset menu readability, native tab-closing behavior, and sustained performance remain unverified.

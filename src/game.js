@@ -1,3 +1,4 @@
+import { DIFFICULTIES } from './menu.js';
 // All combat coordinates are 2D. Depth belongs exclusively to presentation.
 export const FIELD = { left: -8, right: 8, bottom: -4.5, top: 4.5 };
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -7,7 +8,14 @@ export function segmentHits(ax, ay, bx, by, x, y, radius) {
   return Math.hypot(ax + dx * t - x, ay + dy * t - y) <= radius;
 }
 export class Game {
-  constructor(seed = 42) { this.initialSeed = seed; this.reset(); }
+  constructor(seed = 42) { this.initialSeed = seed; this.difficulty = 'arcade'; this.reset(); }
+  setDifficulty(id) {
+    const next = Object.hasOwn(DIFFICULTIES, id) ? id : 'arcade';
+    const ratio = DIFFICULTIES[next].speed / DIFFICULTIES[this.difficulty].speed;
+    for (const shot of this.shots || []) if (shot.hostile) { shot.vx *= ratio; shot.vy *= ratio; }
+    this.difficulty = next;
+  }
+  get tuning() { return DIFFICULTIES[this.difficulty]; }
   reset() {
     this.seed = this.initialSeed; this.nextId = 1; this.time = 0; this.state = 'playing';
     this.player = { x: -4.8, y: 0, r: .09, hp: 5, shield: 0, invincible: 2, weapon: 'PULSE', level: 1, echo: false, charge: 0, cooldown: 0 };
@@ -26,6 +34,7 @@ export class Game {
     if(this.shotList!==this.shots||this.shots.length!==(this.hostileCount||0)+(this.friendlyCount||0)){this.shotList=this.shots;this.hostileCount=0;this.friendlyCount=0;for(const s of this.shots)s.hostile?this.hostileCount++:this.friendlyCount++;}
     if((hostile?this.hostileCount:this.friendlyCount)>=budget)return;
     if(hostile)this.hostileCount++;else this.friendlyCount++;
+    if (hostile) { vx *= this.tuning.speed; vy *= this.tuning.speed; }
     this.shots.push({ id: this.nextId++, x, y, px: x, py: y, vx, vy, hostile, damage, kind, r, life: 12, level:hostile?1:this.player.level });
   }
   burst(x, y, color, size = 1) { this.emit('burst', { x, y, color, size }); }
@@ -46,7 +55,7 @@ export class Game {
     if(this.wave===5)this.announce('THE GLASS RAIN', 'Find the openings. Left grip / Ctrl for precision.');
   }
   curtain(gapY, speed=2.1) {
-    for(let y=-4.3;y<=4.3;y+=.32)if(Math.abs(y-gapY)>.68)this.addShot(8.25,y,-speed,0,true,1,'needle',.065);
+    for(let y=-4.3;y<=4.3;y+=.32)if(Math.abs(y-gapY)>this.tuning.gap)this.addShot(8.25,y,-speed,0,true,1,'needle',.065);
     this.emit('enemyFire',{x:7,heavy:true});
   }
   spawnBoss(mini = false) {
@@ -70,7 +79,7 @@ export class Game {
   hurtPlayer() {
     const p = this.player; if (p.invincible > 0 || this.state !== 'playing') return;
     if (p.shield > 0) p.shield--; else p.hp--;
-    this.combo=1;this.comboTime=0;p.invincible = 1.2; this.burst(p.x, p.y, 'orange', 1.3); this.emit('hit');
+    this.combo=1;this.comboTime=0;p.invincible = this.tuning.protection; this.burst(p.x, p.y, 'orange', 1.3); this.emit('hit');
     if (p.hp <= 0) { this.state = 'lost'; this.emit('end', { won: false }); }
   }
   damageEnemy(e, amount) {
@@ -152,7 +161,8 @@ export class Game {
       e.attackName='NEEDLE CHOIR';for(let i=-5;i<=5;i++){const a=aim+i*.105;this.addShot(e.x-.7,e.y,Math.cos(a)*speed,Math.sin(a)*speed,true,1,'needle',.055);}
     }
     this.emit('attack',{name:e.attackName,x:e.x,y:e.y});this.emit('enemyFire',{x:e.x,y:e.y,heavy:true});
-    e.fire=cathedral?(phase===3?3.0:phase===2?2.4:1.5):phase>=2?1.8:1.5;
+    const interval=cathedral?(phase===3?3.0:phase===2?2.4:1.5):phase>=2?1.8:1.5;
+    e.fire=this.difficulty==='arcade'?interval:Math.max((e.recovery||0)+.15,interval/this.tuning.cadence);
   }
   update(dt, input = {}) {
     if (this.state !== 'playing') return;
@@ -196,7 +206,7 @@ export class Game {
           if(e.type==='carrier')for(let i=0;i<24;i++){const angle=i/24*Math.PI*2+e.volley*.16;this.addShot(e.x,e.y,Math.cos(angle)*1.7,Math.sin(angle)*1.7,true,1,'orb',.06);}
           else {const count=e.type==='sentinel'?(this.time<24?4:6):e.type==='weaver'?4:3;
             for(let i=-count;i<=count;i++){const angle=a+i*(e.type==='sentinel'?.09:.14)+(e.type==='weaver'?Math.sin(e.age)*.25:0);this.addShot(e.x-.2,e.y,Math.cos(angle)*s,Math.sin(angle)*s,true,1,e.type==='weaver'?'petal':e.type==='sentinel'?'needle':'hostile',.055);}}
-          this.emit('enemyFire',{x:e.x,y:e.y,heavy:e.type==='carrier'});e.fire=e.type==='sentinel'?1.55:e.type==='carrier'?2.1:1.85;
+          this.emit('enemyFire',{x:e.x,y:e.y,heavy:e.type==='carrier'});e.fire=(e.type==='sentinel'?1.55:e.type==='carrier'?2.1:1.85)/this.tuning.cadence;
         }
       }
       if (e.entry <= 0 && Math.hypot(e.x - p.x, e.y - p.y) < e.r + p.r) this.hurtPlayer();

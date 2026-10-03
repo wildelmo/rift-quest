@@ -1,37 +1,70 @@
 import { makeBank } from './sound-bank.js';
 // Layered procedural effects and an adaptive industrial soundtrack; no audio downloads.
 export class Sound {
-  constructor(){this.enabled=true;this.step=0;this.nextBeat=0;this.lastShot=0;this.lastImpact=0;this.lastEnemy=0;this.voices=0;this.sampleVoices=[];}
+  constructor(){this.enabled=true;this.volume=1;this.musicVolume=1;this.desiredRunning=false;this.revision=0;this.sources=new Set();this.step=0;this.nextBeat=0;this.lastShot=0;this.lastImpact=0;this.lastEnemy=0;this.voices=0;this.sampleVoices=[];}
   async start(){
+    this.desiredRunning=true;const revision=this.revision;
+    if(this.closing)await this.closing;
+    if(revision!==this.revision||!this.desiredRunning)return;
     if(!this.ctx){
       this.ctx=new(window.AudioContext||window.webkitAudioContext)();const c=this.ctx;
-      this.master=c.createGain();this.master.gain.value=.48;
+      this.master=c.createGain();this.master.gain.value=this.enabled?.48*this.volume:0;
       this.compressor=c.createDynamicsCompressor();this.compressor.threshold.value=-16;this.compressor.knee.value=12;this.compressor.ratio.value=5;this.compressor.attack.value=.003;this.compressor.release.value=.18;
       this.master.connect(this.compressor).connect(c.destination);this.sfx=c.createGain();this.sfx.gain.value=.9;this.sfx.connect(this.master);this.music=c.createGain();this.music.gain.value=.66;this.music.connect(this.master);this.bus=this.sfx;this.bank=makeBank(c);
       this.reverb=c.createConvolver();const impulse=c.createBuffer(2,c.sampleRate*1.4,c.sampleRate);for(let ch=0;ch<2;ch++){const data=impulse.getChannelData(ch);for(let i=0;i<data.length;i++)data[i]=(Math.random()*2-1)*Math.pow(1-i/data.length,3)*.32;}this.reverb.buffer=impulse;
+      this.musicReverb=c.createConvolver();this.musicReverb.buffer=impulse;this.musicWet=c.createGain();this.musicWet.gain.value=.13/.66;this.musicReverb.connect(this.musicWet).connect(this.music);
       this.wet=c.createGain();this.wet.gain.value=.13;this.reverb.connect(this.wet).connect(this.master);
       this.noiseBuffer=c.createBuffer(1,c.sampleRate*2,c.sampleRate);const n=this.noiseBuffer.getChannelData(0);for(let i=0;i<n.length;i++)n[i]=Math.random()*2-1;
-      this.chargeOsc=c.createOscillator();this.chargeOsc.type='sawtooth';this.chargeFilter=c.createBiquadFilter();this.chargeFilter.type='lowpass';this.chargeGain=c.createGain();this.chargeGain.gain.value=0;this.chargeOsc.connect(this.chargeFilter).connect(this.chargeGain).connect(this.sfx);this.chargeOsc.start();
+      this.chargeOsc=c.createOscillator();this.chargeOsc.type='sawtooth';this.chargeFilter=c.createBiquadFilter();this.chargeFilter.type='lowpass';this.chargeGain=c.createGain();this.chargeGain.gain.value=0;this.chargeOsc.connect(this.chargeFilter).connect(this.chargeGain).connect(this.sfx);this.sources.add(this.chargeOsc);this.chargeOsc.start();
     }
-    await this.ctx.resume();this.nextBeat=this.ctx.currentTime;
+    const c=this.ctx;
+    await c.resume();
+    if(c!==this.ctx||!this.desiredRunning){if(c.state==='running')await c.suspend();return;}
+    this.nextBeat=c.currentTime;
+    this.setVolume(this.volume,this.musicVolume);
+  }
+  setVolume(volume,musicVolume=this.musicVolume){
+    this.volume=Math.max(0,Math.min(1,volume));this.musicVolume=Math.max(0,Math.min(1,musicVolume));
+    if(this.ctx&&this.ctx.state!=='closed'){
+      const t=this.ctx.currentTime;this.master.gain.cancelScheduledValues(t);
+      this.master.gain.setValueAtTime(this.enabled&&this.desiredRunning?.48*this.volume:0,t);
+      this.music.gain.setValueAtTime(.66*this.musicVolume,t);
+    }
+  }
+  suspend(){
+    this.desiredRunning=false;
+    const c=this.ctx;if(!c||c.state==='closed')return Promise.resolve();
+    this.master.gain.cancelScheduledValues(c.currentTime);this.master.gain.setValueAtTime(0,c.currentTime);
+    return c.suspend().catch(()=>{});
+  }
+  dispose(){
+    this.desiredRunning=false;this.revision++;
+    const c=this.ctx;if(!c)return this.closing||Promise.resolve();
+    this.master.gain.cancelScheduledValues(c.currentTime);this.master.gain.setValueAtTime(0,c.currentTime);
+    for(const source of this.sources){try{source.stop();}catch{}source.onended=null;try{source.disconnect();}catch{}}
+    this.sources.clear();this.sampleVoices=[];this.voices=0;
+    for(const key of ['master','compressor','sfx','music','reverb','wet','musicReverb','musicWet','chargeOsc','chargeFilter','chargeGain']){try{this[key]?.disconnect();}catch{}this[key]=null;}
+    this.ctx=null;this.bank=null;this.noiseBuffer=null;this.bus=null;this.step=0;this.nextBeat=0;this.lastShot=0;this.lastImpact=0;this.lastEnemy=0;
+    const closing=c.state==='closed'?Promise.resolve():c.close();this.closing=closing;
+    return closing.finally(()=>{if(this.closing===closing)this.closing=null;});
   }
   route(node,volume,duration,pan=0,wet=.15,delay=0){
     const c=this.ctx,t=c.currentTime+delay+(this.scheduleDelay||0),g=c.createGain(),p=c.createStereoPanner();p.pan.value=Math.max(-.85,Math.min(.85,pan));g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(volume,t+.004);g.gain.exponentialRampToValueAtTime(.0001,t+duration);node.connect(g).connect(p).connect(this.bus||this.sfx);
-    const send=c.createGain();send.gain.value=wet;p.connect(send).connect(this.reverb);
+    const send=c.createGain();send.gain.value=wet;p.connect(send).connect(this.bus===this.music?this.musicReverb:this.reverb);
     return{t,cleanup:()=>{g.disconnect();p.disconnect();send.disconnect();}};
   }
   tone(freq,duration,type='sine',volume=.2,endFreq=freq,pan=0,cutoff=5000,delay=0){
-    if(!this.ctx||!this.enabled||this.ctx.state!=='running'||this.voices>70)return;
-    const c=this.ctx,osc=c.createOscillator(),filter=c.createBiquadFilter();filter.type='lowpass';filter.frequency.value=cutoff;filter.Q.value=.8;osc.type=type;osc.connect(filter);const route=this.route(filter,volume,duration,pan,.18,delay);osc.frequency.setValueAtTime(freq,route.t);osc.frequency.exponentialRampToValueAtTime(Math.max(20,endFreq),route.t+duration);osc.start(route.t);osc.stop(route.t+duration+.01);this.voices++;osc.onended=()=>{this.voices--;osc.disconnect();filter.disconnect();route.cleanup();};
+    if(!this.ctx||!this.enabled||!this.desiredRunning||this.ctx.state!=='running'||this.voices>70)return;
+    const c=this.ctx,osc=c.createOscillator(),filter=c.createBiquadFilter();filter.type='lowpass';filter.frequency.value=cutoff;filter.Q.value=.8;osc.type=type;osc.connect(filter);const route=this.route(filter,volume,duration,pan,.18,delay);osc.frequency.setValueAtTime(freq,route.t);osc.frequency.exponentialRampToValueAtTime(Math.max(20,endFreq),route.t+duration);this.sources.add(osc);osc.start(route.t);osc.stop(route.t+duration+.01);this.voices++;osc.onended=()=>{this.sources.delete(osc);this.voices--;osc.disconnect();filter.disconnect();route.cleanup();};
   }
   noise(duration,volume=.2,cutoff=1800,pan=0,type='lowpass',delay=0){
-    if(!this.ctx||!this.enabled||this.ctx.state!=='running'||this.voices>70)return;
-    const c=this.ctx,source=c.createBufferSource(),filter=c.createBiquadFilter();source.buffer=this.noiseBuffer;filter.type=type;filter.frequency.value=cutoff;filter.Q.value=.7;source.connect(filter);const route=this.route(filter,volume,duration,pan,.3,delay);source.start(route.t,Math.random());source.stop(route.t+duration+.01);this.voices++;source.onended=()=>{this.voices--;source.disconnect();filter.disconnect();route.cleanup();};
+    if(!this.ctx||!this.enabled||!this.desiredRunning||this.ctx.state!=='running'||this.voices>70)return;
+    const c=this.ctx,source=c.createBufferSource(),filter=c.createBiquadFilter();source.buffer=this.noiseBuffer;filter.type=type;filter.frequency.value=cutoff;filter.Q.value=.7;source.connect(filter);const route=this.route(filter,volume,duration,pan,.3,delay);this.sources.add(source);source.start(route.t,Math.random());source.stop(route.t+duration+.01);this.voices++;source.onended=()=>{this.sources.delete(source);this.voices--;source.disconnect();filter.disconnect();route.cleanup();};
   }
   reset(){for(const v of this.sampleVoices){v.gain.gain.setTargetAtTime(.0001,this.ctx.currentTime,.01);v.source.stop(this.ctx.currentTime+.05);}this.sampleVoices=[];this.step=0;this.duckUntil=0;if(this.ctx)this.nextBeat=this.ctx.currentTime;}
-  sample(name,volume=.25,pan=0,rate=1){if(!this.ctx||!this.enabled||this.ctx.state!=='running')return;const c=this.ctx;const same=this.sampleVoices.filter(v=>v.name===name),limit=name==='explosion'?4:name==='collapse'?1:8;if(same.length>=limit){const old=same[0];old.gain.gain.setTargetAtTime(.0001,c.currentTime,.008);old.source.stop(c.currentTime+.04);this.sampleVoices=this.sampleVoices.filter(v=>v!==old);}const source=c.createBufferSource(),gain=c.createGain(),p=c.createStereoPanner();source.buffer=this.bank[name];source.playbackRate.value=rate;gain.gain.value=volume;p.pan.value=Math.max(-.8,Math.min(.8,pan));source.connect(gain).connect(p).connect(this.sfx);const voice={name,source,gain};this.sampleVoices.push(voice);source.start();source.onended=()=>{this.sampleVoices=this.sampleVoices.filter(v=>v!==voice);source.disconnect();gain.disconnect();p.disconnect();};}
+  sample(name,volume=.25,pan=0,rate=1){if(!this.ctx||!this.enabled||!this.desiredRunning||this.ctx.state!=='running')return;const c=this.ctx;const same=this.sampleVoices.filter(v=>v.name===name),limit=name==='explosion'?4:name==='collapse'?1:8;if(same.length>=limit){const old=same[0];old.gain.gain.setTargetAtTime(.0001,c.currentTime,.008);old.source.stop(c.currentTime+.04);this.sampleVoices=this.sampleVoices.filter(v=>v!==old);}const source=c.createBufferSource(),gain=c.createGain(),p=c.createStereoPanner();source.buffer=this.bank[name];source.playbackRate.value=rate;gain.gain.value=volume;p.pan.value=Math.max(-.8,Math.min(.8,pan));source.connect(gain).connect(p).connect(this.sfx);const voice={name,source,gain};this.sampleVoices.push(voice);this.sources.add(source);source.start();source.onended=()=>{this.sources.delete(source);this.sampleVoices=this.sampleVoices.filter(v=>v!==voice);source.disconnect();gain.disconnect();p.disconnect();};}
   event(e){
-    if(!this.ctx||!this.enabled)return;this.bus=this.sfx;this.scheduleDelay=0;const t=this.ctx.currentTime,pan=(e.x||0)/9;
+    if(!this.ctx||!this.enabled||!this.desiredRunning||this.ctx.state!=='running')return;this.bus=this.sfx;this.scheduleDelay=0;const t=this.ctx.currentTime,pan=(e.x||0)/9;
     if(e.type==='shoot'&&t-this.lastShot>.06){this.lastShot=t;this.sample(e.weapon==='LANCE'?'lance':e.weapon==='SPREAD'?'spread':'pulse',e.weapon==='LANCE'?.25:.19,pan,1+((e.level||1)-1)*.06);}
     if(e.type==='impact'&&t-this.lastImpact>.07){this.lastImpact=t;this.sample('impact',e.boss?.13:.18,pan,1+Math.random()*.15);}
     if(e.type==='enemyFire'&&t-this.lastEnemy>.22){this.lastEnemy=t;this.tone(e.heavy?85:260,.14,'sawtooth',.075,e.heavy?48:90,pan,1400);this.noise(.07,.055,1100,pan,'bandpass');}
@@ -48,10 +81,10 @@ export class Sound {
   }
   update(active,phase=0,charge=0,act=1){
     if(!this.ctx)return;const c=this.ctx,t=c.currentTime;
-    this.master.gain.setTargetAtTime(this.enabled?.48:0,t,.02);
+    this.master.gain.setTargetAtTime(this.enabled&&this.desiredRunning?.48*this.volume:0,t,.02);
     this.chargeGain.gain.setTargetAtTime(active&&this.enabled&&charge>.1?.07*charge:0,t,.035);this.chargeOsc.frequency.setTargetAtTime(65+charge*240,t,.03);this.chargeFilter.frequency.setTargetAtTime(200+charge*1800,t,.03);
-    this.music.gain.setTargetAtTime(t<(this.duckUntil||0)?.28:.66,t,.12);this.bus=this.music;
-    if(!active||!this.enabled){this.nextBeat=t;return;}if(t+.06<this.nextBeat)return;this.scheduleDelay=Math.max(0,this.nextBeat-t);
+    this.music.gain.setTargetAtTime((t<(this.duckUntil||0)?.28:.66)*this.musicVolume,t,.12);this.bus=this.music;
+    if(!active||!this.enabled||!this.desiredRunning){this.nextBeat=t;return;}if(t+.06<this.nextBeat)return;this.scheduleDelay=Math.max(0,this.nextBeat-t);
     this.nextBeat+=60/(phase?144:act===3?140:132)/4;if(this.nextBeat<t-.2)this.nextBeat=t;const beat=this.step%16,bar=Math.floor(this.step/16),root=[55,55,65.41,49,55,73.42,65.41,49][bar%8];
     if(beat%4===0){this.tone(135,.24,'sine',.5,32);this.noise(.028,.11,5500,0,'highpass');}
     if(beat===4||beat===12){this.noise(.18,.21,2200,0,'highpass');this.tone(180,.12,'triangle',.11,85);}

@@ -9,8 +9,8 @@ A passthrough mixed-reality side-scrolling shooter for Meta Quest 3, built with 
 1. Open the play URL in Meta Quest Browser on the headset.
 2. Select **Enter mixed reality** and accept the immersive-session prompt. Both Touch controllers are required.
 3. Face the room area you want to use. The flight plane is placed in that direction, near eye height and above the floor.
-4. During **Flight standby**, move the left stick horizontally to adjust width and vertically to adjust distance (5–8 feet). **X** recenters the arena.
-5. Pull the right trigger to start. The arena stays fixed as you move your head.
+4. In the pause menu, move the left stick up/down to select a row and left/right to adjust it. Set arena width and plane distance (5–8 feet). **X** recenters the arena.
+5. Select **Deploy ship** and pull the right trigger to start. The arena stays fixed as you move your head.
 
 The scene has no skybox, opaque background, or background art. The immersive AR session and zero-alpha WebGL clear leave the room visible. Combat simulation is strictly 2D; incoming enemies only become collidable after arriving on the plane. Explosions, debris, hulls, and machinery provide decorative depth. Amber rings mark exact enemy and boss collision boundaries.
 
@@ -26,13 +26,23 @@ Room fit is manual: this version does not scan walls, request room meshes, or oc
 | Precision focus / show hitbox | Left grip | Ctrl |
 | Pulse bomb | A | E |
 | Pause | B | P / Escape |
-| Resume | Right trigger | Resume / P |
+| Resume | Select Resume, right trigger / B | Resume / P |
 | Recenter / enter standby | X | — |
-| Adjust room fit | Left stick during standby | Setup before play |
+| Menu navigation / settings | Left stick up/down selects; left/right adjusts; trigger confirms | Pause menu controls |
 | Restart | Right trigger after results | Restart / R |
-| Exit | Headset system menu | Return to hangar |
+| Exit | Pause → Exit game → right trigger; system session exit also shuts down | Pause → Exit game |
 
 Focus slows movement and reveals the exact hitbox. Full charge takes 1.4 seconds; the lance works with every loadout. Bombs clear hostile bullets, cancel boss beams, briefly protect the ship, and damage enemies. Firing is deliberate. Tracking loss, missing controllers, or app visibility loss pauses play.
+
+## Pause settings and full exit
+
+The desktop and in-headset menus provide master volume, music volume, and **Casual / Arcade / Expert** difficulty. Settings persist between visits and apply during a flight. Casual slows hostile bullets, widens safe corridors, reduces firing cadence, and grants longer protection after a hit. Arcade preserves the original balance. Expert increases hostile speed/cadence and tightens corridors. Ship movement, hitbox, player weapon speed, and beam warnings remain unchanged. Difficulty changes rescale existing hostile velocities without teleporting them or repairing the player.
+
+Pause suspends the AudioContext. App/tab visibility loss also stops game rendering; returning shows the paused state and does not restart audio automatically. Return to hangar closes the old audio context, and starting another flight creates a fresh one.
+
+**Exit game** immediately mutes and stops audio sources, closes the AudioContext, stops animation, ends the immersive session, disposes graphics resources, and attempts to close the tab. Leaving XR through the headset/system menu follows the same cleanup. If the browser refuses tab closure, the game navigates to a static **Game closed** page with no scripts, game canvas, fonts, or media. A web page cannot force the entire browser application to quit.
+
+Research: [XRSession.end only ends the XR session](https://developer.mozilla.org/en-US/docs/Web/API/XRSession/end), [AudioContext.close stops audio processing and releases system resources](https://developer.mozilla.org/en-US/docs/Web/API/AudioContext/close), [window.close restrictions](https://developer.mozilla.org/en-US/docs/Web/API/Window/close), [Page Visibility](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API).
 
 ## One authored level
 
@@ -42,7 +52,7 @@ The clawed **Gatekeeper** arrives at 66 seconds. Its later phases fire coordinat
 
 The **Cathedral** arrives after 180 seconds of level progression. Its phases change from Needle Choir / Bloom attacks, to concentric Orrery rings, to isolated Last Opening corridors alternating with the Heartbreaker beam. Beam warnings last 1.5 seconds. Armor opens and sheds petals; destruction preserves that damaged pose, separates the machinery, and finishes before results appear.
 
-Five power-ups: **Spread**, **Lance**, **Echo**, **Shield**, and **Bomb**. Duplicate weapons upgrade to level 3. Spread gains damage, cadence, and a seven-shot formation. Lance gains damage and parallel rails. Echo adds a second firing drone; shields absorb damage and repair one hull point. Nearby pickups magnetize. Grazing builds a visible temporary score multiplier; damage resets it. The browser stores only the best score.
+Five power-ups: **Spread**, **Lance**, **Echo**, **Shield**, and **Bomb**. Duplicate weapons upgrade to level 3. Spread gains damage, cadence, and a seven-shot formation. Lance gains damage and parallel rails. Echo adds a second firing drone; shields absorb damage and repair one hull point. Nearby pickups magnetize. Grazing builds a visible temporary score multiplier; damage resets it. The browser stores the best score and flight settings locally.
 
 ## Art, motion, and sound
 
@@ -68,8 +78,11 @@ The main branch deploys through .github/workflows/deploy.yml. Pages Source is Gi
 - src/view.js: instancing, shaders, motion, anchored arena, collision markers, and in-headset HUD.
 - src/main.js: desktop/XR lifecycle, controllers, room fit, pause, fixed simulation, and accessible menus.
 - src/audio.js / src/sound-bank.js: PCM effects, adaptive music, scheduling, voice management, ducking, and mixing.
-- tests/game.test.js: 20 checks covering collision, progression, power-ups, budgets, phase isolation/recovery, act deferral, and deterministic stress.
+- src/menu.js: validated saved settings and controller-operated pause menu.
+- tests/game.test.js / tests/menu.test.js: 24 checks covering collision, progression, power-ups, budgets, phase isolation/recovery, act deferral, and deterministic stress.
 - tests/render-check.cjs / tests/audio-check.cjs / tests/showcase-check.cjs: optional isolated Chrome scene, busy mix, composited motion, and lifecycle verification. Use Playwright through NODE_PATH; scene/audio checks accept RIFT_BROWSER.
+
+The optional tests/lifecycle-check.cjs checks pause/audio suspension, saved settings, difficulty, hangar/reentry, hidden-page rendering, complete shutdown, blocked/allowed tab closure, simulated XR controller and session events, failure cleanup, and audio-resume races. Its fake XR transport is not a physical headset test.
 
 ## Validation and limits
 

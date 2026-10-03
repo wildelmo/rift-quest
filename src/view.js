@@ -9,7 +9,7 @@ export class View {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6)); this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.setClearColor(0x000000, 0); this.renderer.xr.enabled = true; this.renderer.xr.setReferenceSpaceType('local-floor');
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=.95; container.append(this.renderer.domElement);
-    this.art=new Art();const pmrem=new THREE.PMREMGenerator(this.renderer),studio=new RoomEnvironment();this.environment=pmrem.fromScene(studio,.04).texture;studio.dispose();pmrem.dispose();
+    this.art=new Art();const pmrem=new THREE.PMREMGenerator(this.renderer),studio=new RoomEnvironment();this.environmentTarget=pmrem.fromScene(studio,.04);this.environment=this.environmentTarget.texture;studio.dispose();pmrem.dispose();
     this.scene = new THREE.Scene(); this.scene.add(new THREE.HemisphereLight(0xc6e5ff, 0x12223c, .65));
     this.scene.environment=this.environment;
     const key = new THREE.DirectionalLight(0xffddbb, 2.4); key.position.set(-3, 5, 6); this.scene.add(key);
@@ -40,6 +40,7 @@ export class View {
     for (const x of [-8,8]) for (const y of [-4.5,4.5]) { this.corners.add(this.mesh('box', 0x779387, true, [x - Math.sign(x)*.15,y,0], [.3,.015,.015])); this.corners.add(this.mesh('box', 0x779387, true,[x,y-Math.sign(y)*.15,0],[.015,.3,.015])); }
     this.hud = this.textPanel(1536, 180, 15, 1.76); this.hud.position.set(0, 5.1, 0); this.root.add(this.hud);
     this.message = this.textPanel(1536, 560, 11.5, 4.2); this.message.position.set(0, .4, .4); this.root.add(this.message);
+    this.pausePanel=this.textPanel(1536,1000,9,5.86);this.pausePanel.position.set(0,.2,.45);this.pausePanel.visible=false;this.root.add(this.pausePanel);
     this.bossBar = this.textPanel(1024, 110, 7, .75); this.bossBar.position.set(1.5, -4.85, 0); this.root.add(this.bossBar);
     this.previewScene = new THREE.Scene();this.previewScene.environment=this.environment; this.previewScene.add(new THREE.HemisphereLight(0xe0eeff,0x101a30,.7));
     const previewLight = new THREE.DirectionalLight(0xffe0c3,3); previewLight.position.set(-2,4,5); this.previewScene.add(previewLight);
@@ -47,7 +48,25 @@ export class View {
     this.previewShip = this.makeShip(); this.previewShip.scale.setScalar(2.9); this.previewScene.add(this.previewShip);
     this.previewRing = new THREE.Group(); this.previewScene.add(this.previewRing);
     for (let i = 0; i < 2; i++) { const ring = new THREE.Mesh(this.geo.ring,this.material(i ? 0x263440 : 0x477586,true)); ring.scale.setScalar(1.55 + i*.1);ring.position.z=-1; ring.rotation.x=.45; ring.rotation.y=-.6; this.previewRing.add(ring); }
-    addEventListener('resize', () => this.resize()); this.resize();
+    this.onResize=()=>this.resize();addEventListener('resize',this.onResize); this.resize();
+  }
+  dispose() {
+    if(this.disposed)return;this.disposed=true;
+    this.renderer.setAnimationLoop(null);removeEventListener('resize',this.onResize);
+    const geometries=new Set(),materials=new Set(),textures=new Set();
+    const collectMaterial=m=>{if(!m)return;materials.add(m);for(const value of Object.values(m))if(value?.isTexture)textures.add(value);for(const uniform of Object.values(m.uniforms||{}))if(uniform?.value?.isTexture)textures.add(uniform.value);};
+    const collect=o=>{if(o.geometry)geometries.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:[o.material])collectMaterial(m);};
+    this.scene.traverse(collect);this.previewScene.traverse(collect);
+    for(const model of this.art.models.values())model.traverse(collect);
+    for(const m of this.art.materials.values())collectMaterial(m);
+    for(const m of Object.values(this.mat))collectMaterial(m);
+    for(const g of [...Object.values(this.geo),this.art.box,this.art.cylinder,this.art.sphere,this.art.plane])geometries.add(g);
+    textures.add(this.art.surface);textures.add(this.art.glowTexture);
+    for(const g of geometries)g.dispose();for(const m of materials)m.dispose();for(const t of textures)t?.dispose();
+    this.environmentTarget.dispose();this.scene.clear();this.previewScene.clear();
+    this.objects.clear();this.pickupObjects.clear();this.effectObjects.clear();this.art.models.clear();this.art.materials.clear();
+    this.particles=[];this.fragments=[];this.cinematics=[];this.flashes=[];this.shockwaves=[];
+    this.renderer.dispose();this.renderer.forceContextLoss();this.renderer.domElement.remove();
   }
   mesh(shape,c,emissive=false,pos=[0,0,0],scale=[1,1,1]) { const m = new THREE.Mesh(this.geo[shape],this.material(c,emissive)); m.position.set(...pos); m.scale.set(...scale); return m; }
   makeShip() {
@@ -69,8 +88,21 @@ export class View {
     const panel=new THREE.Mesh(new THREE.PlaneGeometry(width,height),material); panel.userData={canvas,ctx:canvas.getContext('2d'),texture,last:''}; return panel;
   }
   paintPanel(panel, key, draw) { if(panel.userData.last===key)return; panel.userData.last=key; const {canvas,ctx,texture}=panel.userData; ctx.clearRect(0,0,canvas.width,canvas.height); draw(ctx,canvas.width,canvas.height); texture.needsUpdate=true; }
-  hudUpdate(game, xr, paused, message, settings) {
-    const p=game.player;this.message.position.y=paused||game.state!=='playing'?.4:4.05;this.message.scale.setScalar(paused||game.state!=='playing'?1:.60); this.hud.visible=xr; this.message.visible=xr && (paused || game.state==='lost' || (game.state==='won'&&!this.cinematics.some(c=>c.kind==='death')) || (game.state==='playing'&&!!message)); this.corners.visible=!xr || paused;
+  hudUpdate(game, xr, paused, message, settings, menu) {
+    this.pausePanel.visible=xr&&paused;
+    if(this.pausePanel.visible&&menu)this.paintPanel(this.pausePanel,JSON.stringify(menu)+settings.difficulty,(c,w,h)=>{
+      c.fillStyle='#102019f2';c.fillRect(0,0,w,h);c.strokeStyle='#729b85';c.lineWidth=3;c.strokeRect(2,2,w-4,h-4);
+      c.textAlign='left';c.fillStyle='#ff9468';c.font='bold 54px monospace';c.fillText('RIFT / FLIGHT SYSTEMS',64,85);
+      c.fillStyle='#a9c4b6';c.font='28px monospace';c.fillText('PAUSED · '+settings.difficulty.toUpperCase()+' · YOUR ROOM IS THE WORLD',64,137);
+      for(let i=0;i<menu.rows.length;i++){
+        const row=menu.rows[i],y=178+i*74,selected=i===menu.selected;
+        if(selected){c.fillStyle='#b4ffe2';c.fillRect(40,y,w-80,66);}
+        c.fillStyle=selected?'#102019':row.id==='exit'?'#ffa17c':'#e1f5e9';c.font='bold 38px monospace';c.fillText((selected?'› ':'  ')+row.label,64,y+46);
+        c.textAlign='right';c.font='36px monospace';c.fillText(row.value,w-72,y+46);c.textAlign='left';
+      }
+      c.fillStyle='#a9c4b6';c.font='26px monospace';c.fillText('LEFT STICK ↑↓ SELECT / ←→ ADJUST',64,904);c.fillText('RIGHT TRIGGER CONFIRM · B RESUME · X RECENTER',64,952);
+    });
+    const p=game.player;this.message.position.y=paused||game.state!=='playing'?.4:4.05;this.message.scale.setScalar(paused||game.state!=='playing'?1:.60); this.hud.visible=xr; this.message.visible=xr && !paused && ( game.state==='lost' || (game.state==='won'&&!this.cinematics.some(c=>c.kind==='death')) || (game.state==='playing'&&!!message)); this.corners.visible=!xr || paused;
     if (xr) this.paintPanel(this.hud,`${p.hp}/${p.shield}/${p.weapon}/${p.level}/${p.echo}/${game.bombs}/${game.score}/${Math.floor(p.charge*10)}`,c=>{
       c.fillStyle='#101e19dd'; c.fillRect(0,30,1536,125); c.fillStyle='#ff956b'; c.font='bold 32px monospace'; c.fillText('RIFT / 01',30,78);
       c.fillStyle='#edfae8'; c.font='26px monospace'; c.fillText(`HULL ${'◆'.repeat(Math.max(0,p.hp))}  SHIELD ${p.shield}`,30,123); c.fillText(`${p.weapon} ${p.level} ${p.echo?'+ ECHO':''}`,570,78); c.fillText(`BOMBS ${game.bombs}  CHARGE ${Math.floor(p.charge/1.4*100)}%   ×${game.combo.toFixed(1)}`,570,123); c.fillStyle='#b4ffe2'; c.font='bold 43px monospace'; c.fillText(String(game.score).padStart(6,'0'),1280,107);
@@ -83,7 +115,7 @@ export class View {
       c.textAlign='center';c.shadowColor='#081510';c.shadowBlur=8;c.fillStyle='#ff9468';c.font=`bold ${paused||ended?66:48}px monospace`;c.fillText(title||'',w/2,paused||ended?130:100);
       c.fillStyle='#daf7e5';c.font='28px monospace';c.fillText(subtitle||'',w/2,paused||ended?205:157);
       if(paused){c.font='28px monospace';c.fillText('LEFT STICK: WIDTH / DISTANCE   ·   X: RECENTER',w/2,290);c.fillText('RIGHT TRIGGER: DEPLOY / RESUME   ·   B: PAUSE',w/2,348);c.fillStyle='#9cbaa9';c.font='24px monospace';c.fillText('FLY: LEFT STICK   FIRE: RIGHT TRIGGER   CHARGE: RIGHT GRIP',w/2,430);c.fillText('LEFT GRIP: PRECISION FOCUS   ·   A: PULSE BOMB',w/2,477);}
-      if(ended){c.font='30px monospace';c.fillText('RIGHT TRIGGER TO FLY AGAIN',w/2,350);c.fillStyle='#9cbaa9';c.font='24px monospace';c.fillText('Use the system menu to leave mixed reality.',w/2,425);}
+      if(ended){c.font='30px monospace';c.fillText('RIGHT TRIGGER TO FLY AGAIN',w/2,350);c.fillStyle='#9cbaa9';c.font='24px monospace';c.fillText('B: SETTINGS / EXIT GAME',w/2,425);}
     });
     this.bossBar.visible=!!game.boss;
     if(game.boss) {const b=game.boss;this.paintPanel(this.bossBar,`${b.type}/${Math.ceil(b.hp)}/${b.phase}/${b.attackName}`,c=>{c.fillStyle='#13241dea';c.fillRect(0,0,1024,110);c.fillStyle='#ffbc8b';c.font='23px monospace';c.fillText(`${b.type.toUpperCase()} / PHASE ${b.phase} / ${b.attackName||'AWAKENING'}`,20,35);c.fillStyle='#3e5549';c.fillRect(20,60,984,22);c.fillStyle='#ff7545';c.fillRect(20,60,984*Math.max(0,b.hp/b.maxHp),22);});}
