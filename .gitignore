@@ -1,8 +1,0 @@
-node_modules/
-.npm-cache/
-.artifacts/
-dist/
-test-results/
-playwright-report/
-*.log
-.DS_Store
