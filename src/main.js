@@ -15,7 +15,7 @@ const keys = new Set(), previousButtons = new Map();
 function resetGame() { game.reset(); view.clear(); message = null; fixedAccumulator = 0; }
 function startDesktop() { resetGame(); playing = true; paused = false; document.body.classList.add('playing'); $('shell').hidden = true; $('game-ui').hidden = false; $('overlay').hidden = true; view.desktop(); sound.start().catch(() => {}); }
 function setPaused(value) { paused = value; keys.clear(); fixedAccumulator = 0; if (!xrSession) { $('overlay').hidden = !paused; if(paused) { $('overlay-label').textContent='FLIGHT SYSTEMS';$('overlay-title').textContent='Paused';$('overlay-copy').textContent='Take a breath. The invasion can wait.';$('resume').hidden=false; } } }
-function returnHome() { if(xrSession) { xrSession.end(); return; } playing=false; paused=false;keys.clear();$('shell').hidden=false;$('game-ui').hidden=true;$('overlay').hidden=true;document.body.classList.remove('playing');view.desktop(); }
+function returnHome() { if(xrSession) { xrSession.end(); return; } sound.update(false,0,0);playing=false; paused=false;keys.clear();$('shell').hidden=false;$('game-ui').hidden=true;$('overlay').hidden=true;document.body.classList.remove('playing');view.desktop(); }
 $('practice').addEventListener('click', startDesktop);
 $('pause').addEventListener('click', () => setPaused(!paused));
 $('resume').addEventListener('click', () => setPaused(false));
@@ -57,11 +57,11 @@ $('enter-xr').addEventListener('click',async()=>{
 });
 function rising(key,down){const before=previousButtons.get(key);previousButtons.set(key,down);return down&&!before;}
 function readInput(dt,now){
-  if(!xrSession)return{x:(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0),y:(keys.has('KeyW')||keys.has('ArrowUp')?1:0)-(keys.has('KeyS')||keys.has('ArrowDown')?1:0),fire:keys.has('Space'),charge:keys.has('ShiftLeft')||keys.has('ShiftRight'),bomb:false};
+  if(!xrSession)return{x:(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0),y:(keys.has('KeyW')||keys.has('ArrowUp')?1:0)-(keys.has('KeyS')||keys.has('ArrowDown')?1:0),fire:keys.has('Space'),charge:keys.has('ShiftLeft')||keys.has('ShiftRight'),focus:keys.has('ControlLeft')||keys.has('ControlRight'),bomb:false};
   let left=null,right=null;for(const source of xrSession.inputSources){if(source.handedness==='left')left=source.gamepad;if(source.handedness==='right')right=source.gamepad;}
   const b=(pad,i)=>!!pad?.buttons[i]?.pressed;
   const axis=(pad,i)=>{const v=pad?.axes[i]||0;return Math.abs(v)<.15?0:Math.sign(v)*(Math.abs(v)-.15)/.85;};
-  const input={x:axis(left,2),y:-axis(left,3),fire:b(right,0),charge:b(right,1),bomb:b(right,4)};
+  const input={x:axis(left,2),y:-axis(left,3),fire:b(right,0),charge:b(right,1),focus:b(left,1),bomb:b(right,4)};
   const trigger=rising('trigger',input.fire),pause=rising('pause',b(right,5)),recenter=rising('recenter',b(left,4));
   if(pause&&game.state==='playing')setPaused(!paused);
   if(recenter){setPaused(true);needsPlacement=true;}
@@ -78,6 +78,7 @@ function readInput(dt,now){
 function haptic(strength,duration){if(!xrSession)return;for(const s of xrSession.inputSources){if(s.handedness==='right')s.gamepad?.hapticActuators?.[0]?.pulse(strength,duration)?.catch(()=>{});}}
 function handleEvents(now){for(const e of game.drainEvents()){
   sound.event(e);
+  view.event(e);
   if(e.type==='burst')view.burst(e);
   if(e.type==='announce'){message={title:e.title,subtitle:e.subtitle};messageUntil=now+3;}
   if(e.type==='hit')haptic(.7,160);
@@ -95,7 +96,7 @@ view.renderer.setAnimationLoop((ms,frame)=>{
     if(xrSession&&frame){const pose=frame.getViewerPose(view.renderer.xr.getReferenceSpace());if(pose){lastPose=pose;if(needsPlacement){view.place(pose,settings);needsPlacement=false;}}else if(!paused)setPaused(true);}
     const input=readInput(dt,now);
     if(!paused&&game.state==='playing') {fixedAccumulator+=dt;while(fixedAccumulator>=1/90){game.update(1/90,input);fixedAccumulator-=1/90;}}else fixedAccumulator=0;
-    handleEvents(now);sound.update(!paused&&game.state==='playing',!!game.boss);view.update(game,paused?0:dt,now);
+    handleEvents(now);sound.update(!paused&&game.state==='playing',game.boss?.phase||0,game.player.charge);view.update(game,paused?0:dt,now);
     if(now-messageUntil>0)message=null;
     view.hudUpdate(game,!!xrSession,paused,message,settings);
     uiClock+=dt;if(uiClock>.1){updateDOM(now);uiClock=0;}
@@ -103,4 +104,4 @@ view.renderer.setAnimationLoop((ms,frame)=>{
   view.render(now,playing);
 });
 // Development-only observability for deterministic browser verification.
-if(import.meta.env.DEV)window.__rift={game,view,startDesktop,get paused(){return paused;},get playing(){return playing;}};
+if(import.meta.env.DEV)window.__rift={game,view,sound,startDesktop,get paused(){return paused;},get playing(){return playing;}};
