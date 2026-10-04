@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { hullTextures, boxUVs } from './textures.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
 // Procedural, low-poly but sculpted models. Every model merges its parts into two meshes:
 // a lit "hull" (flat-shaded metal with vertex colours) and an unlit "glow" layer. That keeps
@@ -255,161 +256,184 @@ export function buildOption() {
 
 // ---------- enemies ----------
 
-/** Smooth body of revolution along Z. profile: [[radius, z], ...] from nose (-Z) to tail (+Z). */
-function hullBody(profile, segments = 14) {
-  const pts = profile.map(([r, z]) => new THREE.Vector2(Math.max(r, 0.00001), -z));
-  const g = new THREE.LatheGeometry(pts, segments);
-  g.rotateX(-Math.PI / 2);
+// ---------- the Rift drone fleet ----------
+// One design language for every enemy: black gunmetal hard-surface armour with bevelled
+// edges, layered plates and greebles, red energy seams, and a single glowing cyclops lens.
+
+const DR = {
+  gun: 0x30343d, dark: 0x1a1c22, mid: 0x4d525e, light: 0x7b808c, accent: 0x5c1a24,
+  red: 0xff2a40, hot: 0xff6a2a, white: 0xfff0f0,
+};
+
+/** Bevelled box: the bevel catches a specular edge highlight, which is what reads as "machined". */
+function rbox(w, h, d, r = Math.min(w, h, d) * 0.2) {
+  return new RoundedBoxGeometry(w, h, d, 2, Math.min(r, Math.min(w, h, d) * 0.49));
+}
+
+/** Blade fin extruded from an outline in the XZ plane (span along +X), chamfered edges. */
+function blade(points, t) {
+  const shape = new THREE.Shape();
+  shape.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i < points.length; i++) shape.lineTo(points[i][0], points[i][1]);
+  shape.closePath();
+  const g = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: true, bevelThickness: t * 0.45, bevelSize: t * 0.6, bevelSegments: 2 });
+  g.translate(0, 0, -t / 2);
+  g.rotateX(Math.PI / 2);
   return g;
 }
 
-/** Upper shell cap (a slice of a sphere), for carapace armour. */
-function carapace(radius, arc = 0.45, segs = 16) {
-  return new THREE.SphereGeometry(radius, segs, 8, 0, Math.PI * 2, 0, Math.PI * arc);
+/** Cyclops eye: armoured housing, metal ring and a hot lens, facing -Z at z. */
+function eye(b, z, r, color = DR.red) {
+  b.add(new THREE.CylinderGeometry(r * 1.25, r * 1.5, r * 1.1, 16).rotateX(Math.PI / 2), DR.dark, { pos: [0, 0, z + r * 0.4], smooth: true });
+  b.add(new THREE.TorusGeometry(r * 1.2, r * 0.18, 8, 24), DR.light, { pos: [0, 0, z], smooth: true });
+  b.add(new THREE.SphereGeometry(r, 16, 12), color, { pos: [0, 0, z], scale: [1, 1, 0.55], glow: true });
+  b.add(new THREE.SphereGeometry(r * 0.38, 10, 8), DR.white, { pos: [0, 0, z - r * 0.4], glow: true });
 }
 
-const ALIEN = {
-  hull: 0x3a3e48, shell: 0x6e1d2b, shell2: 0x4a1520, bone: 0xc8bfa8, dark: 0x22242c, metal: 0x7d828e, wing: 0x565b68,
-  eye: 0xff2238, vein: 0xff3a52, engine: 0xff8a2a,
-};
+/** Thruster nozzle facing +Z at z with a hot core. */
+function nozzle(b, x, y, z, r) {
+  b.add(new THREE.CylinderGeometry(r, r * 1.25, r * 1.6, 14, 1, true).rotateX(Math.PI / 2), DR.mid, { pos: [x, y, z], smooth: true });
+  b.add(new THREE.TorusGeometry(r * 1.2, r * 0.16, 6, 18), DR.dark, { pos: [x, y, z + r * 0.8], smooth: true });
+  b.add(new THREE.CylinderGeometry(r * 0.9, r * 0.9, r * 0.2, 14).rotateX(Math.PI / 2), DR.hot, { pos: [x, y, z + r * 0.3], glow: true });
+}
 
-/** Wasp interceptor: insect-like alien fighter with carapace armour, mandibles and blade wings. ~8 cm. */
+/** Stinger: X-fin interceptor drone. ~9 cm. */
 export function buildDart() {
   const b = new ModelBuilder();
-  const C = ALIEN;
-  // thorax + abdomen body with a pinched waist
-  b.add(hullBody([[0, -0.044], [0.004, -0.039], [0.0085, -0.03], [0.011, -0.016], [0.0115, -0.002], [0.0098, 0.009], [0.0055, 0.015], [0.0085, 0.021], [0.0095, 0.03], [0.006, 0.039], [0, 0.043]]), C.hull, { scale: [1.25, 0.8, 1], smooth: true });
-  // carapace plates
-  b.add(carapace(0.0145, 0.42), C.shell, { pos: [0, 0.0035, -0.012], scale: [1.05, 0.62, 2.0], smooth: true });
-  b.add(carapace(0.011, 0.45), C.shell2, { pos: [0, 0.0035, 0.028], scale: [1.05, 0.7, 1.35], smooth: true });
-  for (let i = 0; i < 4; i++) b.add(new THREE.BoxGeometry(0.0022, 0.0028, 0.006), C.metal, { pos: [0, 0.0115 - Math.abs(i - 1.5) * 0.0012, -0.026 + i * 0.008] });
-  // mandibles curving in at the nose
-  b.add(taper(0.0022, 0.0003, 0.024, 5), C.bone, { pos: [0.0075, -0.0025, -0.05], rot: [0.08, -0.32, 0], mirrorX: true });
-  b.add(taper(0.0015, 0.0002, 0.014, 5), C.bone, { pos: [0.011, -0.004, -0.04], rot: [0.1, -0.7, 0], mirrorX: true });
-  // eye clusters
-  for (const [x, y, z, r] of [[0.0062, 0.0032, -0.031, 0.0021], [0.0078, 0.0008, -0.027, 0.0017], [0.0052, 0.0052, -0.025, 0.0015]]) {
-    b.add(new THREE.SphereGeometry(r, 8, 6), C.eye, { pos: [x, y, z], glow: true, mirrorX: true });
+  // armoured core pod with collars
+  b.add(rbox(0.024, 0.02, 0.054, 0.006), DR.gun);
+  b.add(rbox(0.029, 0.025, 0.011, 0.003), DR.dark, { pos: [0, 0, -0.013] });
+  b.add(rbox(0.029, 0.025, 0.011, 0.003), DR.dark, { pos: [0, 0, 0.013] });
+  b.add(rbox(0.016, 0.006, 0.03, 0.002), DR.mid, { pos: [0, 0.012, 0.0] });
+  b.add(rbox(0.006, 0.004, 0.022, 0.0015), DR.accent, { pos: [0, 0.0158, 0.0] });
+  // seams of red energy in the collars
+  for (const z of [-0.0075, 0.0075]) b.add(rbox(0.0262, 0.0222, 0.0012, 0.0005), DR.red, { pos: [0, 0, z], glow: true });
+  eye(b, -0.03, 0.0072);
+  // X-configured blade fins with lit leading edges
+  const finPts = [[0, -0.016], [0.026, 0.0], [0.04, 0.016], [0.036, 0.024], [0.016, 0.02], [0, 0.018]];
+  for (let k = 0; k < 4; k++) {
+    const a = Math.PI / 4 + k * Math.PI / 2;
+    const fin = blade(finPts, 0.0016);
+    fin.translate(0.01, 0, 0);
+    fin.rotateZ(a);
+    b.add(fin, k % 2 ? DR.mid : DR.gun);
+    const edge = new THREE.BoxGeometry(0.03, 0.0011, 0.0013);
+    edge.rotateY(-Math.atan2(0.016, 0.026) * 0.9);
+    edge.translate(0.027, 0, -0.0075);
+    edge.rotateZ(a);
+    b.add(edge, DR.red, { glow: true });
+    const tip = new THREE.BoxGeometry(0.004, 0.0035, 0.01);
+    tip.translate(0.041, 0, 0.018);
+    tip.rotateZ(a);
+    b.add(tip, DR.dark);
   }
-  // blade wings with glowing veins
-  b.add(wing([[0.008, -0.012], [0.042, 0.004], [0.049, 0.018], [0.038, 0.015], [0.01, 0.006]], 0.0012), C.wing, { pos: [0, 0.001, 0], mirrorX: true });
-  b.add(new THREE.BoxGeometry(0.036, 0.0008, 0.0011), C.vein, { pos: [0.026, 0.0018, -0.0035], rot: [0, -0.45, 0], glow: true, mirrorX: true });
-  b.add(wing([[0.006, 0.012], [0.032, 0.026], [0.035, 0.035], [0.008, 0.022]], 0.001), C.shell2, { pos: [0, -0.001, 0], mirrorX: true });
-  b.add(new THREE.BoxGeometry(0.026, 0.0007, 0.001), C.vein, { pos: [0.02, -0.0002, 0.019], rot: [0, -0.5, 0], glow: true, mirrorX: true });
-  // dorsal fin + tail stinger engine
-  b.add(wing([[0, 0.018], [0.012, 0.03], [0.012, 0.036], [0, 0.032]], 0.0012), C.shell, { pos: [0, 0.006, 0], rot: [0, 0, Math.PI / 2] });
-  b.add(new THREE.TorusGeometry(0.0055, 0.0014, 6, 14), C.metal, { pos: [0, 0, 0.041], smooth: true });
-  b.add(new THREE.SphereGeometry(0.0045, 10, 8), C.engine, { pos: [0, 0, 0.042], glow: true });
-  return b.build({ metalness: 0.6, roughness: 0.35, unique: true, uvDensity: 11 });
+  nozzle(b, 0, 0, 0.031, 0.0068);
+  b.add(new THREE.CylinderGeometry(0.0007, 0.0007, 0.022, 4), DR.light, { pos: [0.006, 0.02, 0.014] });
+  return b.build({ metalness: 0.65, roughness: 0.32, unique: true, uvDensity: 16, envIntensity: 1.5 });
 }
 
-/** Spore mine: armoured core whose shell petals open to fire spirals. */
+/** Spinner: turret drone whose armoured arms open into a firing star. */
 export function buildBloom() {
-  const C = ALIEN;
-  const core = new ModelBuilder();
-  core.add(new THREE.SphereGeometry(0.028, 18, 14), C.hull, { smooth: true });
-  core.add(new THREE.SphereGeometry(0.016, 14, 10), C.eye, { pos: [0, 0, 0.02], glow: true, scale: [1, 1, 0.55] });
-  core.add(new THREE.TorusGeometry(0.019, 0.0028, 8, 24), C.bone, { pos: [0, 0, 0.022], smooth: true });
-  core.add(new THREE.TorusGeometry(0.033, 0.004, 8, 28), C.metal, { smooth: true });
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    core.add(new THREE.BoxGeometry(0.006, 0.006, 0.01), C.dark, { pos: [Math.cos(a) * 0.033, Math.sin(a) * 0.033, -0.004], rot: [0, 0, a] });
+  const hub = new ModelBuilder();
+  hub.add(new THREE.CylinderGeometry(0.03, 0.033, 0.026, 6).rotateX(Math.PI / 2), DR.gun);
+  hub.add(new THREE.CylinderGeometry(0.024, 0.024, 0.03, 6).rotateX(Math.PI / 2).rotateZ(Math.PI / 6), DR.dark);
+  hub.add(new THREE.TorusGeometry(0.031, 0.0026, 6, 6), DR.red, { pos: [0, 0, 0.004], rot: [0, 0, Math.PI / 6], glow: true });
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+    hub.add(rbox(0.012, 0.008, 0.01, 0.002), DR.mid, { pos: [Math.cos(a) * 0.026, Math.sin(a) * 0.026, -0.012], rot: [0, 0, a] });
   }
-  const group = core.build({ metalness: 0.7, roughness: 0.3, unique: true, uvDensity: 11 });
-  const petals = new ModelBuilder();
+  eye(hub, -0.016, 0.011);
+  nozzle(hub, 0, 0, 0.018, 0.009);
+  const group = hub.build({ metalness: 0.65, roughness: 0.32, unique: true, uvDensity: 16, envIntensity: 1.5 });
+  const arms = new ModelBuilder();
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
-    // a curved armour petal: a slice of a sphere shell, pointing outward like a flower
-    const petal = new THREE.SphereGeometry(0.05, 10, 8, -0.38, 0.76, Math.PI * 0.12, Math.PI * 0.36);
-    petal.rotateZ(-Math.PI / 2);
-    petal.rotateY(-Math.PI / 2); // sphere slice now bulges toward +Z, spreading along +Y
-    petal.translate(0, 0.012, -0.03);
-    petal.rotateZ(a);
-    petals.add(petal, i % 2 ? C.shell : C.shell2, { smooth: true });
-    const spike = taper(0.0045, 0.0, 0.03, 5);
-    spike.rotateX(Math.PI / 2);
-    spike.translate(0, 0.068, -0.004);
-    spike.rotateZ(a);
-    petals.add(spike, C.bone);
-    const tip = new THREE.SphereGeometry(0.004, 8, 6);
-    tip.translate(0, 0.084, -0.004);
-    tip.rotateZ(a);
-    petals.add(tip, C.engine, { glow: true });
-    const vein = new THREE.BoxGeometry(0.0016, 0.03, 0.0012);
-    vein.translate(0, 0.045, 0.009);
-    vein.rotateZ(a);
-    petals.add(vein, C.vein, { glow: true });
+    const part = (geo, color, opts = {}) => {
+      geo.rotateZ(a);
+      arms.add(geo, color, opts);
+    };
+    part(new THREE.CylinderGeometry(0.0055, 0.0055, 0.012, 10).rotateX(Math.PI / 2).translate(0, 0.036, 0), DR.light, { smooth: true });
+    part(rbox(0.011, 0.04, 0.009, 0.003).translate(0, 0.056, 0), DR.gun);
+    part(rbox(0.015, 0.024, 0.005, 0.002).translate(0, 0.058, -0.006), DR.dark);
+    part(new THREE.BoxGeometry(0.0016, 0.026, 0.001).translate(0, 0.058, -0.0088), DR.red, { glow: true });
+    part(rbox(0.016, 0.01, 0.012, 0.003).translate(0, 0.08, 0), DR.mid);
+    part(new THREE.SphereGeometry(0.0042, 10, 8).translate(0, 0.084, -0.006), DR.hot, { glow: true });
   }
-  const petalGroup = petals.build({ metalness: 0.5, roughness: 0.35, uvDensity: 11 });
-  group.add(petalGroup);
-  group.userData.petals = petalGroup;
+  const armGroup = arms.build({ metalness: 0.65, roughness: 0.32, uvDensity: 16, envIntensity: 1.5 });
+  group.add(armGroup);
+  group.userData.petals = armGroup;
   return group;
 }
 
-/** Swarm mite: a tiny wasp drone, geometry only (rendered instanced). ~3.5 cm. */
+/** Swarm mite: a miniature X-fin drone, geometry only (rendered instanced). ~4 cm. */
 export function miteGeometries() {
   const b = new ModelBuilder();
-  const C = ALIEN;
-  b.add(hullBody([[0, -0.018], [0.004, -0.012], [0.0055, -0.004], [0.003, 0.004], [0.0045, 0.01], [0, 0.017]], 10), C.hull, { scale: [1.2, 0.8, 1], smooth: true });
-  b.add(carapace(0.006, 0.45, 10), C.shell, { pos: [0, 0.0015, -0.006], scale: [1, 0.6, 1.8], smooth: true });
-  b.add(wing([[0.003, -0.004], [0.02, 0.004], [0.022, 0.01], [0.004, 0.004]], 0.0008), C.wing, { mirrorX: true });
-  b.add(new THREE.BoxGeometry(0.016, 0.0006, 0.0008), C.vein, { pos: [0.012, 0.0006, 0.0], rot: [0, -0.4, 0], glow: true, mirrorX: true });
-  b.add(new THREE.SphereGeometry(0.0022, 8, 6), C.eye, { pos: [0.0028, 0.0018, -0.013], glow: true, mirrorX: true });
-  b.add(new THREE.SphereGeometry(0.0022, 8, 6), C.engine, { pos: [0, 0, 0.017], glow: true });
-  return b.geometries(13);
+  b.add(rbox(0.012, 0.01, 0.026, 0.003), DR.gun);
+  b.add(rbox(0.014, 0.012, 0.005, 0.0015), DR.dark, { pos: [0, 0, -0.004] });
+  b.add(new THREE.SphereGeometry(0.0038, 10, 8), DR.red, { pos: [0, 0, -0.0135], scale: [1, 1, 0.6], glow: true });
+  for (let k = 0; k < 4; k++) {
+    const a = Math.PI / 4 + k * Math.PI / 2;
+    const fin = blade([[0, -0.007], [0.016, 0.004], [0.017, 0.01], [0, 0.009]], 0.0011);
+    fin.translate(0.005, 0, 0);
+    fin.rotateZ(a);
+    b.add(fin, k % 2 ? DR.mid : DR.gun);
+  }
+  b.add(new THREE.CylinderGeometry(0.0035, 0.0035, 0.001, 10).rotateX(Math.PI / 2), DR.hot, { pos: [0, 0, 0.0135], glow: true });
+  return b.geometries(18);
 }
 
-/** Lancer: long laser frigate with a forked prow cradling the emitter crystal. ~19 cm. */
+/** Lancer: twin-boom beam frigate with a focusing crystal between the booms. ~18 cm. */
 export function buildLancer() {
   const b = new ModelBuilder();
-  const C = ALIEN;
-  b.add(hullBody([[0, -0.07], [0.006, -0.064], [0.011, -0.048], [0.015, -0.02], [0.017, 0.02], [0.015, 0.048], [0.019, 0.058], [0.017, 0.074], [0.008, 0.082], [0, 0.084]], 16), C.hull, { scale: [1.2, 0.78, 1], smooth: true });
-  b.add(carapace(0.02, 0.4), C.shell, { pos: [0, 0.006, -0.01], scale: [0.95, 0.55, 2.6], smooth: true });
-  for (const z of [-0.035, -0.005, 0.025, 0.05]) b.add(new THREE.TorusGeometry(0.0168, 0.0022, 6, 20), C.metal, { pos: [0, 0, z], scale: [1.2, 0.78, 1], smooth: true });
-  // forked prow
   for (const sx of [-1, 1]) {
-    b.add(taper(0.005, 0.0015, 0.05, 6), C.bone, { pos: [0.011 * sx, 0, -0.085], rot: [0, 0.12 * sx, 0] });
-    b.add(new THREE.SphereGeometry(0.0022, 8, 6), C.vein, { pos: [0.014 * sx, 0, -0.108], glow: true });
+    b.add(rbox(0.015, 0.016, 0.15, 0.004), DR.gun, { pos: [0.02 * sx, 0, 0.0] });
+    b.add(rbox(0.018, 0.006, 0.09, 0.002), DR.dark, { pos: [0.02 * sx, 0.01, 0.02] });
+    b.add(new THREE.BoxGeometry(0.0014, 0.004, 0.08), DR.red, { pos: [0.0285 * sx, 0, 0.01], glow: true });
+    b.add(rbox(0.012, 0.012, 0.016, 0.003), DR.mid, { pos: [0.02 * sx, 0, -0.08] });
+    b.add(new THREE.SphereGeometry(0.0035, 10, 8), DR.red, { pos: [0.02 * sx, 0, -0.089], glow: true });
+    for (let i = 0; i < 4; i++) b.add(rbox(0.017, 0.018, 0.004, 0.0015), DR.dark, { pos: [0.02 * sx, 0, -0.045 + i * 0.03] });
+    nozzle(b, 0.02 * sx, 0, 0.078, 0.007);
   }
-  b.add(new THREE.OctahedronGeometry(0.012, 0), 0xff3355, { pos: [0, 0, -0.088], glow: true, scale: [0.8, 0.8, 1.7] });
-  b.add(new THREE.TorusGeometry(0.014, 0.0025, 6, 18), C.metal, { pos: [0, 0, -0.072], smooth: true });
-  // swept fins with veins
-  b.add(wing([[0.014, 0.03], [0.07, 0.07], [0.076, 0.084], [0.06, 0.082], [0.016, 0.06]], 0.0025), C.shell2, { mirrorX: true });
-  b.add(wing([[0.012, -0.03], [0.045, -0.005], [0.048, 0.004], [0.014, -0.01]], 0.002), C.wing, { mirrorX: true });
-  b.add(new THREE.BoxGeometry(0.056, 0.0012, 0.0014), C.vein, { pos: [0.044, 0.0015, 0.055], rot: [0, -0.62, 0], glow: true, mirrorX: true });
-  // engines
-  for (const sx of [-1, 1]) {
-    b.add(new THREE.CylinderGeometry(0.0065, 0.0075, 0.016, 12).rotateX(Math.PI / 2), C.dark, { pos: [0.012 * sx, 0, 0.078], smooth: true });
-    b.add(new THREE.CylinderGeometry(0.005, 0.005, 0.002, 12).rotateX(Math.PI / 2), C.engine, { pos: [0.012 * sx, 0, 0.087], glow: true });
-  }
-  return b.build({ metalness: 0.6, roughness: 0.35, unique: true, uvDensity: 10 });
+  b.add(blade([[0, 0.02], [0.03, 0.05], [0.032, 0.07], [0, 0.06]], 0.002), DR.mid, { pos: [0.026, 0, 0], mirrorX: true });
+  // spine and cross braces
+  b.add(rbox(0.022, 0.012, 0.11, 0.004), DR.gun, { pos: [0, 0.006, 0.02] });
+  b.add(rbox(0.012, 0.008, 0.06, 0.003), DR.accent, { pos: [0, 0.014, 0.03] });
+  for (const z of [-0.03, 0.02, 0.06]) b.add(rbox(0.05, 0.006, 0.008, 0.002), DR.mid, { pos: [0, -0.004, z] });
+  // focusing crystal with coil rings
+  b.add(new THREE.OctahedronGeometry(0.011, 0), 0xff3355, { pos: [0, 0, -0.07], scale: [0.75, 0.75, 1.9], glow: true });
+  for (const z of [-0.058, -0.072, -0.086]) b.add(new THREE.TorusGeometry(0.0115, 0.0016, 6, 20), DR.light, { pos: [0, 0, z], smooth: true });
+  return b.build({ metalness: 0.65, roughness: 0.32, unique: true, uvDensity: 14, envIntensity: 1.5 });
 }
 
-/** Carrier: heavy armoured mothership with launch bays, a bridge tower and an engine cluster. ~30 cm. */
+/** Carrier: heavy armoured mothership with a glowing hangar mouth, turrets and an engine bank. ~30 cm. */
 export function buildCarrier() {
   const b = new ModelBuilder();
-  const C = ALIEN;
-  b.add(hullBody([[0, -0.15], [0.016, -0.14], [0.034, -0.11], [0.05, -0.06], [0.058, 0.0], [0.058, 0.06], [0.05, 0.11], [0.042, 0.13], [0, 0.135]], 18), C.hull, { scale: [1.45, 0.62, 1], smooth: true });
-  b.add(carapace(0.06, 0.38, 20), C.shell, { pos: [0, 0.01, -0.02], scale: [1.25, 0.5, 2.0], smooth: true });
-  // armour belt and side launch bays
-  for (const sx of [-1, 1]) {
-    b.add(new THREE.BoxGeometry(0.03, 0.04, 0.17), C.metal, { pos: [0.083 * sx, -0.004, 0.0] });
-    b.add(new THREE.BoxGeometry(0.004, 0.022, 0.12), C.engine, { pos: [0.099 * sx, -0.004, 0.0], glow: true });
-    for (let i = 0; i < 5; i++) b.add(new THREE.BoxGeometry(0.034, 0.006, 0.02), C.dark, { pos: [0.083 * sx, 0.019, -0.065 + i * 0.033] });
-  }
+  b.add(rbox(0.13, 0.05, 0.24, 0.01), DR.gun);
+  b.add(rbox(0.1, 0.022, 0.17, 0.006), DR.dark, { pos: [0, 0.033, 0.02] });
+  b.add(rbox(0.06, 0.012, 0.11, 0.004), DR.mid, { pos: [0, 0.049, 0.03] });
   // bridge tower
-  b.add(new THREE.BoxGeometry(0.03, 0.03, 0.04), C.metal, { pos: [0, 0.045, 0.045] });
-  b.add(taper(0.016, 0.01, 0.03, 6), C.dark, { pos: [0, 0.064, 0.045], rot: [Math.PI / 2, 0, 0] });
-  b.add(new THREE.BoxGeometry(0.026, 0.004, 0.003), 0x55e6ff, { pos: [0, 0.052, 0.025], glow: true });
-  for (const sx of [-1, 1]) b.add(new THREE.CylinderGeometry(0.0012, 0.0012, 0.05, 5), C.metal, { pos: [0.01 * sx, 0.085, 0.055] });
-  // ram prong + sensor eye
-  b.add(taper(0.012, 0.002, 0.06, 6), C.bone, { pos: [0, -0.01, -0.17] });
-  b.add(new THREE.SphereGeometry(0.014, 14, 10), C.eye, { pos: [0, 0.006, -0.125], glow: true, scale: [1.3, 0.6, 1] });
-  // engine cluster
-  for (const [x, y] of [[-0.03, 0], [0.03, 0], [0, 0.018], [0, -0.016]]) {
-    b.add(new THREE.CylinderGeometry(0.011, 0.013, 0.022, 14).rotateX(Math.PI / 2), C.dark, { pos: [x, y, 0.135], smooth: true });
-    b.add(new THREE.CylinderGeometry(0.009, 0.009, 0.002, 14).rotateX(Math.PI / 2), C.engine, { pos: [x, y, 0.147], glow: true });
+  b.add(rbox(0.032, 0.03, 0.04, 0.005), DR.gun, { pos: [0, 0.07, 0.07] });
+  b.add(new THREE.BoxGeometry(0.026, 0.0035, 0.002), 0xff4a5a, { pos: [0, 0.076, 0.0495], glow: true });
+  for (const sx of [-1, 1]) b.add(new THREE.CylinderGeometry(0.0012, 0.0012, 0.05, 5), DR.light, { pos: [0.011 * sx, 0.1, 0.08] });
+  // hangar mouth at the bow
+  b.add(rbox(0.07, 0.03, 0.02, 0.004), DR.dark, { pos: [0, -0.002, -0.118] });
+  b.add(new THREE.BoxGeometry(0.058, 0.02, 0.002), DR.red, { pos: [0, -0.002, -0.1295], glow: true });
+  for (let i = 0; i < 4; i++) b.add(new THREE.BoxGeometry(0.002, 0.022, 0.003), DR.mid, { pos: [-0.021 + i * 0.014, -0.002, -0.13] });
+  // sponsons with energy seams and vents
+  for (const sx of [-1, 1]) {
+    b.add(rbox(0.032, 0.04, 0.2, 0.006), DR.mid, { pos: [0.08 * sx, -0.004, 0.01] });
+    b.add(new THREE.BoxGeometry(0.0016, 0.026, 0.16), DR.red, { pos: [0.0965 * sx, -0.004, 0.01], glow: true });
+    for (let i = 0; i < 6; i++) b.add(rbox(0.034, 0.006, 0.014, 0.002), DR.dark, { pos: [0.08 * sx, 0.018, -0.07 + i * 0.03] });
+    // turret
+    b.add(new THREE.CylinderGeometry(0.012, 0.014, 0.01, 12), DR.dark, { pos: [0.04 * sx, 0.049, -0.05], smooth: true });
+    b.add(rbox(0.014, 0.008, 0.018, 0.003), DR.gun, { pos: [0.04 * sx, 0.057, -0.052] });
+    b.add(new THREE.CylinderGeometry(0.0018, 0.0018, 0.026, 6).rotateX(Math.PI / 2), DR.light, { pos: [0.04 * sx, 0.057, -0.072] });
   }
-  return b.build({ metalness: 0.65, roughness: 0.3, unique: true, uvDensity: 7 });
+  // armour plates stacked on the flanks
+  for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) b.add(rbox(0.006, 0.034, 0.05, 0.002), DR.dark, { pos: [0.066 * sx, 0.006, -0.06 + i * 0.06] });
+  // engine bank
+  for (const [x, y] of [[-0.04, 0], [0.04, 0], [-0.014, 0.004], [0.014, 0.004]]) nozzle(b, x, y, 0.126, 0.011);
+  return b.build({ metalness: 0.65, roughness: 0.32, unique: true, uvDensity: 10, envIntensity: 1.5 });
 }
 
 /** Power capsule (Gradius style): a glowing gem in a cage. */

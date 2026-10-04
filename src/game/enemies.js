@@ -382,7 +382,7 @@ export class Swarm {
     if (this.mites.length >= this.capacity) return;
     const game = this.game;
     const m = {
-      alive: true, kind: 'mite', score: 50, radius: 0.018, hp: 1, explodeScale: 0.6, contact: true,
+      alive: true, kind: 'mite', score: 50, radius: 0.022, hp: 1, explodeScale: 0.6, contact: true,
       pos: new THREE.Vector3(), prev: new THREE.Vector3(), quat: new THREE.Quaternion(), t: 0,
       off: new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(spread),
       wob: rand(0, TAU), wobF: rand(2, 4), path, duration, flash: 0, shooter, shot: false,
@@ -440,7 +440,7 @@ export class Swarm {
     const n = this.mites.length;
     for (let i = 0; i < n; i++) {
       const m = this.mites[i];
-      this._s.setScalar(1);
+      this._s.setScalar(1.35);
       _m.compose(m.pos, m.quat, this._s);
       this.hull.setMatrixAt(i, _m);
       this.glow.setMatrixAt(i, _m);
