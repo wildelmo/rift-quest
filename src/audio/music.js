@@ -57,8 +57,13 @@ export const ARRANGEMENTS = {
   bossRage: { arp: 0.8, hat: 1, bass: 1, kick: 1, snare: 1, lead: 1, toms: 0.9, pad: 0.3 },
 };
 
+// Internal mix level of the music bus; the player's MUSIC slider scales on top of this,
+// so 1.0 on the slider is the loudest the music gets.
+const BUS_LEVEL = 0.45;
+
 export class Music {
   constructor() {
+    this.userVolume = 1;
     this.ctx = null;
     this.song = STAGE;
     this.pendingSong = null;
@@ -73,13 +78,22 @@ export class Music {
   attach(ctx, destination, reverbSend) {
     this.ctx = ctx;
     this.bus = ctx.createGain();
-    this.bus.gain.value = 0.55;
+    this.bus.gain.value = BUS_LEVEL;
     this.filter = ctx.createBiquadFilter();
     this.filter.type = 'lowpass';
     this.filter.frequency.value = 20000;
     this.filter.Q.value = 0.7;
-    this.bus.connect(this.filter).connect(destination);
-    this.reverbSend = reverbSend;
+    // The player's volume sits after the bus (which setMuffle animates) so the two never fight.
+    this.volume = ctx.createGain();
+    this.volume.gain.value = this.userVolume;
+    this.bus.connect(this.filter).connect(this.volume).connect(destination);
+    // Reverb sends go through their own gain so they follow the volume slider too.
+    this.reverbSend = null;
+    if (reverbSend) {
+      this.reverbSend = ctx.createGain();
+      this.reverbSend.gain.value = this.userVolume;
+      this.reverbSend.connect(reverbSend);
+    }
     // Tempo-synced feedback delay for arp + lead
     this.delay = ctx.createDelay(2);
     this.delayFb = ctx.createGain();
@@ -129,12 +143,21 @@ export class Music {
     this.playing = false;
   }
 
-  /** Muffles the music (used while paused or during slow motion). */
+  /** Muffles the music (used while paused or during slow motion). Only touches the bus. */
   setMuffle(amount) {
     if (!this.ctx) return;
     const f = 20000 * Math.pow(1 - amount, 3) + 350;
     this.filter.frequency.setTargetAtTime(f, this.ctx.currentTime, 0.15);
-    this.bus.gain.setTargetAtTime(0.55 * (1 - amount * 0.45), this.ctx.currentTime, 0.15);
+    this.bus.gain.setTargetAtTime(BUS_LEVEL * (1 - amount * 0.45), this.ctx.currentTime, 0.15);
+  }
+
+  /** The player's music volume, 0..1 (0 silences it). Safe to call before attach. */
+  setVolume(v) {
+    this.userVolume = Math.min(1, Math.max(0, v));
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.volume.gain.setTargetAtTime(this.userVolume, t, 0.04);
+    if (this.reverbSend) this.reverbSend.gain.setTargetAtTime(this.userVolume, t, 0.04);
   }
 
   /** Short one-shot jingles, independent of the sequencer. */

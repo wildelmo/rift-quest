@@ -116,7 +116,8 @@ export class DesktopInput {
     this.bKey = false;
     this.head = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
     this.raycaster = new THREE.Raycaster();
-    this.pointer = { hand: 'mouse', origin: new THREE.Vector3(), quaternion: new THREE.Quaternion(), select: false };
+    this.pointer = { hand: 'mouse', origin: new THREE.Vector3(), quaternion: new THREE.Quaternion(), select: false, hold: false };
+    this.menuDown = false; // left button went down while the menu was open and is still held
     this.menuOpen = null;
     dom.addEventListener('pointermove', (e) => {
       const r = dom.getBoundingClientRect();
@@ -124,16 +125,18 @@ export class DesktopInput {
     });
     dom.addEventListener('pointerdown', (e) => {
       if (e.button === 0) {
-        if (this.menuOpen && this.menuOpen()) this.menuClick = true;
+        if (this.menuOpen && this.menuOpen()) { this.menuClick = true; this.menuDown = true; }
         else if (!this.holding) this.holding = true;
         else { this.trigger = true; this.triggerLatch = true; }
       }
       if (e.button === 2) { this.bombKey = true; this.bombLatch = true; }
     });
     dom.addEventListener('pointerup', (e) => {
-      if (e.button === 0) this.trigger = false;
+      if (e.button === 0) { this.trigger = false; this.menuDown = false; }
       if (e.button === 2) this.bombKey = false;
     });
+    // releasing outside the canvas must not leave a menu slider stuck to the cursor
+    window.addEventListener('pointerup', (e) => { if (e.button === 0) this.menuDown = false; });
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener('wheel', (e) => {
       this.depth = clamp(this.depth + Math.sign(e.deltaY) * 0.03, -0.35, 0.18);
@@ -191,6 +194,7 @@ export class DesktopInput {
     this.pointer.origin.copy(this.raycaster.ray.origin);
     this.pointer.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), this.raycaster.ray.direction);
     this.pointer.select = this.menuClick;
+    this.pointer.hold = this.menuDown && !!(this.menuOpen && this.menuOpen());
     this.menuClick = false;
     h.b = this.bKey;
     h.stick = this.stickKey;

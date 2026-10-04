@@ -12,6 +12,7 @@ import { stage, WAVES } from './stage.js';
 import { PALETTE } from './models.js';
 import { Screens } from './screens.js';
 import { Menu } from './menu.js';
+import { loadAudioSettings, saveAudioSettings } from '../audio/settings.js';
 
 // The game: state machine, collision resolution, scoring and feedback (sound, haptics,
 // hit-stop, flashes). Everything gameplay-related lives in arena-local space.
@@ -60,8 +61,8 @@ export class Game {
     this.screens = new Screens(room);
     this.menu = new Menu(this);
     this.menuKey = '';
-    this.muted = false;
-    try { this.muted = localStorage.getItem('rift.muted') === '1'; } catch { /* storage unavailable */ }
+    this.audioSettings = loadAudioSettings(); // { music, effects, muted }
+    this.applyAudioSettings();
     room.onLayout = () => this.screens.layout();
     this.headWorld = new THREE.Vector3(0, 1.6, 0);
     this.headLocal = new THREE.Vector3(0, 0.28, 0.4);
@@ -798,7 +799,7 @@ export class Game {
     if (this.menu.visible) {
       const pointers = [];
       for (const [name, h] of Object.entries(hands)) {
-        if (h && h.ray && h.ray.position && h.tracked !== false) pointers.push({ hand: name, origin: h.ray.position, quaternion: h.ray.quaternion, select: h.edges.trigger });
+        if (h && h.ray && h.ray.position && h.tracked !== false) pointers.push({ hand: name, origin: h.ray.position, quaternion: h.ray.quaternion, select: h.edges.trigger, hold: h.trigger > 0.5 });
       }
       if (frame.pointer) pointers.push(frame.pointer);
       if (this.menu.update(realDt, pointers)) return;
@@ -911,29 +912,47 @@ export class Game {
     this.input.requestHold && this.input.requestHold();
   }
 
+  get muted() { return this.audioSettings.muted; }
+
   toggleMute() {
-    this.muted = !this.muted;
-    try { localStorage.setItem('rift.muted', this.muted ? '1' : '0'); } catch { /* storage unavailable */ }
-    this.applyMute();
+    this.audioSettings.muted = !this.audioSettings.muted;
+    saveAudioSettings(this.audioSettings);
+    this.applyAudioSettings();
     this.menuKey = '';
   }
 
-  applyMute() {
-    this.sfx.volume = this.muted ? 0 : 1;
-    if (this.music.bus) this.music.bus.gain.setTargetAtTime(this.muted ? 0 : 0.55, this.music.ctx.currentTime, 0.1);
+  /** kind: 'music' | 'effects'; v: 0..1 */
+  setVolume(kind, v) {
+    const s = this.audioSettings;
+    v = Math.min(1, Math.max(0, v));
+    if (s[kind] === v) return;
+    s[kind] = v;
+    saveAudioSettings(s);
+    this.applyAudioSettings();
+  }
+
+  /** Pushes the player's audio settings to the mixer (muted silences both). */
+  applyAudioSettings() {
+    const s = this.audioSettings;
+    this.music.setVolume(s.muted ? 0 : s.music);
+    this.sfx.setVolume(s.muted ? 0 : s.effects);
   }
 
   _menuSpec() {
-    const sound = { label: this.muted ? 'SOUND: OFF' : 'SOUND: ON', action: () => this.toggleMute() };
+    const sound = [
+      { type: 'slider', label: 'MUSIC', get: () => this.audioSettings.music, set: (v) => this.setVolume('music', v) },
+      { type: 'slider', label: 'EFFECTS', get: () => this.audioSettings.effects, set: (v) => this.setVolume('effects', v) },
+      { label: this.muted ? 'SOUND: OFF' : 'SOUND: ON', action: () => this.toggleMute() },
+    ];
     const exit = { label: 'EXIT GAME', danger: true, action: () => this.onExit && this.onExit() };
     if (this.state === 'paused') {
       return ['PAUSED', [
         { label: 'RESUME', action: (hand) => { if (!this.heldHand) this._grab(hand === 'mouse' ? 'right' : hand); else this._resume(); this.input.requestHold && this.input.requestHold(); } },
         { label: 'RESTART STAGE', action: (hand) => { this._attach(hand); this.startGame(0); } },
-        sound, exit,
+        ...sound, exit,
       ], 'center'];
     }
-    if (this.state === 'title') return ['OPTIONS', [sound, exit], 'side'];
+    if (this.state === 'title') return ['OPTIONS', [...sound, exit], 'side'];
     if (this.state === 'gameover' && this.restReady) {
       const from = this.continueFrom >= WAVES.length ? 'THE GYRE' : `WAVE ${this.continueFrom + 1}`;
       return ['GAME OVER', [
@@ -943,7 +962,7 @@ export class Game {
       ], 'side'];
     }
     if (this.state === 'victory' && this.restReady) {
-      return ['WELL DONE', [{ label: 'PLAY AGAIN', action: (hand) => { this._attach(hand); this.startGame(0); } }, sound, exit], 'side'];
+      return ['WELL DONE', [{ label: 'PLAY AGAIN', action: (hand) => { this._attach(hand); this.startGame(0); } }, ...sound, exit], 'side'];
     }
     return null;
   }

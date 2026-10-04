@@ -9,6 +9,22 @@ const ROW = 0.062;
 const TITLE_H = 0.09;
 const PPM = 1900;
 
+// Slider row layout, as fractions of the panel width: label on the left, bar on the right.
+export const SLIDER_BAR = Object.freeze({ x0: 0.4, x1: 0.77 });
+const SLIDER_LABEL_X = 0.09;
+const SLIDER_PCT_X = 0.925;
+
+/** Maps a horizontal panel coordinate (uv.x, 0..1) to a slider value, clamped to 0..1. */
+export function sliderValueAt(u, bar = SLIDER_BAR) {
+  const v = (u - bar.x0) / (bar.x1 - bar.x0);
+  return v <= 0 ? 0 : v >= 1 ? 1 : v;
+}
+
+/** Whether a horizontal panel coordinate is on (or just beside) a slider's bar. */
+export function onSliderBar(u, bar = SLIDER_BAR) {
+  return u >= bar.x0 - 0.04 && u <= bar.x1 + 0.04;
+}
+
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -27,6 +43,7 @@ export class Menu {
     this.hover = -1;
     this.visible = false;
     this.panel = null;
+    this.drags = {}; // hand -> index of the slider that hand is dragging
     this.raycaster = new THREE.Raycaster();
     this.lasers = {};
     for (const hand of ['left', 'right', 'mouse']) {
@@ -55,7 +72,8 @@ export class Menu {
   }
 
   /**
-   * items: [{ label, action, disabled? }]. where: 'center' | 'side'.
+   * items: [{ label, action, disabled?, danger? }] or sliders
+   * [{ type: 'slider', label, get: () => 0..1, set: (v) => void }]. where: 'center' | 'side'.
    */
   show(title, items, where = 'center') {
     this.title = title;
@@ -68,11 +86,13 @@ export class Menu {
     m.lookAt(head);
     this.visible = true;
     this.hover = -1;
+    this.drags = {};
     this._draw();
   }
 
   hide() {
     this.visible = false;
+    this.drags = {};
     if (this.panel) this.panel.opacity = 0;
     for (const l of Object.values(this.lasers)) l.beam.visible = l.dot.visible = false;
   }
@@ -92,6 +112,7 @@ export class Menu {
     drawText(ctx, this.title, w / 2, top / 2 + 6, { size: 64, fit: w * 0.85, glow: '#33e1ff', spacing: 0.25 });
     this.items.forEach((it, i) => {
       const y = top + i * pxRow;
+      if (it.type === 'slider') { this._drawSlider(it, y, i === this.hover && !it.disabled); return; }
       const hov = i === this.hover && !it.disabled;
       ctx.fillStyle = hov ? 'rgba(51,225,255,0.85)' : 'rgba(255,255,255,0.08)';
       roundRect(ctx, 40, y + 8, w - 80, pxRow - 16, 22);
@@ -106,6 +127,67 @@ export class Menu {
       });
     });
     p.commit();
+  }
+
+  _drawSlider(it, y, hov) {
+    const { ctx, w } = this.panel;
+    const pxRow = ROW * PPM;
+    const cy = y + pxRow / 2;
+    const v = Math.min(1, Math.max(0, it.get()));
+    ctx.fillStyle = hov ? 'rgba(51,225,255,0.22)' : 'rgba(255,255,255,0.08)';
+    roundRect(ctx, 40, y + 8, w - 80, pxRow - 16, 22);
+    ctx.fill();
+    ctx.strokeStyle = hov ? 'rgba(51,225,255,0.95)' : 'rgba(51,225,255,0.55)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    const dim = it.disabled;
+    drawText(ctx, it.label, w * SLIDER_LABEL_X, cy + 2, {
+      size: 40, fit: w * (SLIDER_BAR.x0 - SLIDER_LABEL_X - 0.03), align: 'left', italic: false, weight: 900, spacing: 0.1,
+      color: dim ? '#5f6b78' : '#e8f6ff', glow: '#33e1ff',
+    });
+    // track, fill and knob
+    const x0 = w * SLIDER_BAR.x0, x1 = w * SLIDER_BAR.x1, th = 16;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    roundRect(ctx, x0, cy - th / 2, x1 - x0, th, th / 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(51,225,255,0.45)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    const xv = x0 + (x1 - x0) * v;
+    if (xv - x0 > 1) {
+      ctx.save();
+      ctx.shadowColor = '#33e1ff';
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = dim ? '#5f6b78' : '#33e1ff';
+      roundRect(ctx, x0, cy - th / 2, Math.max(th, xv - x0), th, th / 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.beginPath();
+    ctx.arc(xv, cy, hov ? 22 : 19, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#33e1ff';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    drawText(ctx, `${Math.round(v * 100)}%`, w * SLIDER_PCT_X, cy + 2, {
+      size: 34, align: 'right', italic: false, weight: 800, spacing: 0.04,
+      color: dim ? '#5f6b78' : '#e8f6ff', glow: null,
+    });
+  }
+
+  /** Moves slider i to the panel coordinate u; ticks every 10% so it can be felt. */
+  _setSlider(i, u, hand) {
+    const it = this.items[i];
+    const v = Math.round(sliderValueAt(u) * 100) / 100;
+    const prev = it.get();
+    if (v === prev) return false;
+    it.set(v);
+    if (Math.floor(v * 10 + 1e-6) !== Math.floor(prev * 10 + 1e-6)) {
+      this.game.input.haptic(hand, 0.2, 10);
+      this.game.sfx.play('ui', null, { vol: 0.3, minGap: 0.07 });
+    }
+    return true;
   }
 
   /** World position of the centre of item i (used by automated tests). */
@@ -125,13 +207,13 @@ export class Menu {
   }
 
   /**
-   * pointers: [{ hand, origin: Vector3 (world), quaternion (world), select: bool (edge) }]
-   * Returns true when a selection happened.
+   * pointers: [{ hand, origin: Vector3 (world), quaternion (world), select: bool (edge), hold: bool }]
+   * Sliders follow a pointer whose trigger is held on them. Returns true when a button was chosen.
    */
   update(dt, pointers) {
     if (!this.visible) return false;
     this.panel.opacity = Math.min(1, (this.panel.material.opacity || 0) + dt * 6);
-    let hover = -1, chosen = null, chooser = null;
+    let hover = -1, chosen = null, chooser = null, changed = false;
     const seen = new Set();
     for (const ptr of pointers) {
       const laser = this.lasers[ptr.hand];
@@ -146,16 +228,31 @@ export class Menu {
       laser.beam.quaternion.copy(ptr.quaternion);
       laser.beam.scale.set(1, 1, len);
       laser.dot.visible = !!hit;
+      const pressed = ptr.select || ptr.hold;
+      let drag = this.drags[ptr.hand];
+      if (drag !== undefined && !pressed) { delete this.drags[ptr.hand]; drag = undefined; }
       if (hit) {
         laser.dot.position.copy(hit.point);
         const idx = this._itemAt(hit.uv);
-        if (idx >= 0) {
+        if (drag !== undefined) {
+          // keep following the trigger even if the ray drifts off the row
+          hover = drag;
+          changed = this._setSlider(drag, hit.uv.x, ptr.hand) || changed;
+        } else if (idx >= 0) {
           hover = idx;
-          if (ptr.select && !this.items[idx].disabled) { chosen = this.items[idx]; chooser = ptr.hand; }
+          const it = this.items[idx];
+          if (it.disabled) { /* nothing */ } else if (it.type === 'slider') {
+            if (pressed && onSliderBar(hit.uv.x)) {
+              this.drags[ptr.hand] = idx;
+              changed = this._setSlider(idx, hit.uv.x, ptr.hand) || changed;
+            }
+          } else if (ptr.select) { chosen = it; chooser = ptr.hand; }
         }
       }
     }
     for (const [hand, l] of Object.entries(this.lasers)) if (!seen.has(hand)) l.beam.visible = l.dot.visible = false;
+    for (const hand of Object.keys(this.drags)) if (!seen.has(hand)) delete this.drags[hand];
+    if (changed && hover === this.hover) this._draw();
     if (hover !== this.hover) {
       this.hover = hover;
       this._draw();

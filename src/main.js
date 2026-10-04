@@ -82,7 +82,7 @@ function silence() {
 async function wakeAudio() {
   if (options.mute) return;
   await audio.start().catch(() => {});
-  game.applyMute();
+  game.applyAudioSettings();
   audio.music.play('stage', 'title');
 }
 document.addEventListener('visibilitychange', () => {
