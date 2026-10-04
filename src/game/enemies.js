@@ -3,6 +3,7 @@ import { catmullRom, clamp, rand, segmentSphere, TAU, easeInOutCubic } from '../
 import { buildDart, buildBloom, buildLancer, buildCarrier, buildCapsule, buildMine, miteGeometries, hullMaterial, getGlowMaterial, PALETTE, setFlash } from './models.js';
 import { cone, dirTo, fan, normalize, shell } from './patterns.js';
 import { COLORS } from './fx.js';
+import { difficulty } from './difficulty.js';
 import { SHAPE } from '../engine/billboards.js';
 const SHAPE_GLOW = SHAPE.GLOW;
 import { makeCanvas, drawText } from '../engine/text.js';
@@ -14,7 +15,7 @@ const _q = new THREE.Quaternion();
 const _up = new THREE.Vector3(0, 1, 0);
 
 /** Scripted paths run at this fraction of their authored duration (lower = faster enemies). */
-export const PACE = 0.68;
+export const pace = () => difficulty().pace;
 
 /** Base enemy: a model in the arena with hp, a collider sphere and scripted behaviour. */
 export class Enemy {
@@ -27,8 +28,9 @@ export class Enemy {
     this.pos = this.group.position;
     this.prev = new THREE.Vector3();
     this.vel = new THREE.Vector3();
-    this.hp = hp;
-    this.maxHp = hp;
+    // health scales with difficulty (a single bolt still kills anything that had 1 hp)
+    this.hp = Math.max(hp === 1 ? 1 : 0.9, hp * difficulty().enemyHp);
+    this.maxHp = this.hp;
     this.radius = radius;
     this.score = score;
     this.kind = kind;
@@ -170,11 +172,11 @@ export function spawnDart(game, points, duration, opts = {}) {
   const e = new Enemy(game, buildDart(), { hp: opts.hp ?? 4, radius: 0.024, score: 100, kind: 'dart' });
   e.model.scale.setScalar(0.72);
   catmullRom(points, 0, e.pos);
-  e.followPath(points, duration * PACE, { done: () => e.remove() });
+  e.followPath(points, duration * pace(), { done: () => e.remove() });
   e.setJink(opts.jink ?? 0.03, opts.jinkFreq ?? rand(2, 3.2));
   if (opts.shots) {
     e.run((function* () {
-      yield (opts.firstShot ?? rand(0.6, 1.2)) * PACE;
+      yield (opts.firstShot ?? rand(0.6, 1.2)) * pace();
       for (let i = 0; i < opts.shots; i++) {
         if (e.pos.distanceTo(game.ship.pos) < 0.28) break; // never shoot point-blank
         // a quick 3-round burst
@@ -182,7 +184,7 @@ export function spawnDart(game, points, duration, opts = {}) {
           e.shootAt(opts.speed ?? 0.5, opts.kind ?? 'amber');
           yield 0.08;
         }
-        yield (opts.interval ?? rand(0.7, 1.1)) * PACE;
+        yield (opts.interval ?? rand(0.7, 1.1)) * pace();
       }
     })());
   }
@@ -378,7 +380,7 @@ export function spawnCarrier(game, from, station, opts = {}) {
  * pivot. When the sweep ends it pops into a ring of bullets. Shoot it first to disarm it.
  */
 export function spawnMine(game, pos, opts = {}) {
-  const beams = opts.beams ?? 3;
+  const beams = Math.max(2, (opts.beams ?? 3) + difficulty().mineBeams);
   const model = buildMine(beams);
   const e = new Enemy(game, model, { hp: opts.hp ?? 3, radius: 0.026, score: 300, kind: 'mine', explodeScale: 1.4, contact: true });
   e.pos.copy(pos);
@@ -441,10 +443,10 @@ export function spawnHornet(game, from, approach, opts = {}) {
   const e = new Enemy(game, buildDart(), { hp: opts.hp ?? 2, radius: 0.02, score: 250, kind: 'hornet', contact: true });
   e.model.scale.setScalar(0.6);
   e.pos.copy(from);
-  e.followPath([from, approach[0], approach[1]], (opts.travel ?? 2.2) * PACE);
+  e.followPath([from, approach[0], approach[1]], (opts.travel ?? 2.2) * pace());
   e.setJink(0.02, 3.5);
   e.run((function* () {
-    yield (opts.travel ?? 2.2) * PACE;
+    yield (opts.travel ?? 2.2) * pace();
     e.jink = null;
     e.mover = null;
     e.faceShip = false;
@@ -546,7 +548,7 @@ export class Swarm {
       alive: true, kind: 'mite', score: 50, radius: 0.016, hp: 1, explodeScale: 0.6, contact: true,
       pos: new THREE.Vector3(), prev: new THREE.Vector3(), quat: new THREE.Quaternion(), t: 0,
       off: new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(spread),
-      wob: rand(0, TAU), wobF: rand(2, 4), path, duration: duration * PACE, flash: 0, shooter, shot: false,
+      wob: rand(0, TAU), wobF: rand(2, 4), path, duration: duration * pace(), flash: 0, shooter, shot: false,
       aimPoint: (out) => out.copy(m.pos),
       testShot: (s) => (segmentSphere(s.px, s.py, s.pz, s.x, s.y, s.z, m.pos.x, m.pos.y, m.pos.z, m.radius + s.radius) >= 0 ? 'hit' : null),
       damage: (dmg, pt) => {

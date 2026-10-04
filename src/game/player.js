@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { difficulty } from './difficulty.js';
 import { Billboards, SHAPE } from '../engine/billboards.js';
 import { clamp, rand } from '../engine/math.js';
 import { buildPlayerShip, buildOption, SHIP_TURBINES } from './models.js';
@@ -339,8 +340,8 @@ export class Ship {
     this.level = 1;
     this.optionCount = 0;
     this.shield = false;
-    this.bombs = 3;
-    this.lives = 3;
+    this.bombs = difficulty().bombs;
+    this.lives = difficulty().lives;
     this.invuln = 0;
     this.dead = false;
     this.deadTimer = 0;

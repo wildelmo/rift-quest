@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { difficulty } from './difficulty.js';
 import { Billboards, SHAPE } from '../engine/billboards.js';
 import { distSqPointSegment, clamp } from '../engine/math.js';
 import { COLORS } from './fx.js';
@@ -19,8 +20,8 @@ export const BULLET = {
   violet: [0.02, 0.0054, COLORS.violet],
 };
 
-/** Global bullet speed multiplier (difficulty knob). */
-export const BULLET_SPEED = 1.45;
+/** Bullet speed multiplier for the current difficulty. */
+export const bulletSpeed = () => difficulty().bulletSpeed;
 
 class Bullet {
   constructor() {
@@ -47,12 +48,18 @@ export class EnemyBullets {
 
   /** Spawn a bullet. kind is a key of BULLET or a custom [size, radius, color]. */
   spawn(x, y, z, vx, vy, vz, kind = 'small', opts = {}) {
+    // difficulty density: evenly thin the stream so every pattern keeps its shape
+    if (!opts.force) {
+      this.densityBudget = (this.densityBudget || 0) + difficulty().density;
+      if (this.densityBudget < 1) return null;
+      this.densityBudget -= 1;
+    }
     const b = this.free.pop();
     if (!b) return null;
     const k = typeof kind === 'string' ? BULLET[kind] : kind;
     b.alive = true;
     b.x = x; b.y = y; b.z = z;
-    const spd = opts.rawSpeed ? 1 : BULLET_SPEED;
+    const spd = opts.rawSpeed ? 1 : bulletSpeed();
     b.vx = vx * spd; b.vy = vy * spd; b.vz = vz * spd;
     b.size = k[0];
     b.radius = k[1];
@@ -64,7 +71,7 @@ export class EnemyBullets {
     b.turn = opts.turn || 0; // rad/s around turnAxis
     b.turnAxis = opts.turnAxis || null;
     b.aimAt = opts.aimAt ?? -1; // seconds after spawn to re-aim at the ship
-    b.aimSpeed = (opts.aimSpeed ?? 0.5) * BULLET_SPEED;
+    b.aimSpeed = (opts.aimSpeed ?? 0.5) * bulletSpeed();
     b.age = 0;
     b.life = opts.life ?? 14;
     b.grazed = false;

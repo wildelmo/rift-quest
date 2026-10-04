@@ -60,3 +60,13 @@ test('a hit handler that clears bullets does not corrupt the bullet list', async
   b.update(0.016, ship, { onHit() {}, onGraze() {}, onStar() {} });
   assert.ok(b.live.every((x) => x && x.alive));
 });
+
+test('difficulty modes are ordered: easy is gentler than normal, normal than hard', async () => {
+  const { DIFFICULTIES, ORDER } = await import('../src/game/difficulty.js');
+  const [e, n, h] = ORDER.map((k) => DIFFICULTIES[k]);
+  for (const k of ['enemyHp', 'bulletSpeed', 'density', 'pressure']) {
+    assert.ok(e[k] < n[k] && n[k] <= h[k], k);
+  }
+  assert.ok(e.pace > n.pace && n.pace > h.pace, 'lower pace means faster enemies');
+  assert.ok(e.lives >= n.lives && e.bombs >= n.bombs);
+});

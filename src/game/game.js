@@ -12,6 +12,7 @@ import { stage, WAVES } from './stage.js';
 import { PALETTE } from './models.js';
 import { Screens } from './screens.js';
 import { Menu } from './menu.js';
+import { difficulty, nextDifficulty } from './difficulty.js';
 
 // The game: state machine, collision resolution, scoring and feedback (sound, haptics,
 // hit-stop, flashes). Everything gameplay-related lives in arena-local space.
@@ -335,6 +336,7 @@ export class Game {
     this.hud.showPanel('results', {
       score: this.score, newHigh, prompt: 'POINT AT THE MENU AND PULL THE TRIGGER',
       rows: [
+        ['DIFFICULTY', difficulty().label],
         ['TIME', `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`],
         ['BEST CHAIN', `${this.maxChain} kills  ·  ×${chainMultiplier(this.maxChain)}`],
         ['GRAZES', `${this.grazes}`],
@@ -926,6 +928,7 @@ export class Game {
   _menuSpec() {
     const sound = { label: this.muted ? 'SOUND: OFF' : 'SOUND: ON', action: () => this.toggleMute() };
     const exit = { label: 'EXIT GAME', danger: true, action: () => this.onExit && this.onExit() };
+    const diff = { label: `DIFFICULTY: ${difficulty().label}`, action: () => { nextDifficulty(); this.menuKey = ''; } };
     if (this.state === 'paused') {
       return ['PAUSED', [
         { label: 'RESUME', action: (hand) => { if (!this.heldHand) this._grab(hand === 'mouse' ? 'right' : hand); else this._resume(); this.input.requestHold && this.input.requestHold(); } },
@@ -933,17 +936,18 @@ export class Game {
         sound, exit,
       ], 'center'];
     }
-    if (this.state === 'title') return ['OPTIONS', [sound, exit], 'side'];
+    if (this.state === 'title') return ['OPTIONS', [diff, sound, exit], 'side'];
     if (this.state === 'gameover' && this.restReady) {
       const from = this.continueFrom >= WAVES.length ? 'THE GYRE' : `WAVE ${this.continueFrom + 1}`;
       return ['GAME OVER', [
         { label: `CONTINUE (${from})`, action: (hand) => { this._attach(hand); this.continues++; this.score = 0; this.startGame(this.continueFrom, true); } },
         { label: 'RESTART STAGE', action: (hand) => { this._attach(hand); this.startGame(0); } },
+        diff,
         exit,
       ], 'side'];
     }
     if (this.state === 'victory' && this.restReady) {
-      return ['WELL DONE', [{ label: 'PLAY AGAIN', action: (hand) => { this._attach(hand); this.startGame(0); } }, sound, exit], 'side'];
+      return ['WELL DONE', [{ label: 'PLAY AGAIN', action: (hand) => { this._attach(hand); this.startGame(0); } }, diff, sound, exit], 'side'];
     }
     return null;
   }

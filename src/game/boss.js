@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { difficulty } from './difficulty.js';
 import { clamp, easeInOutCubic, easeOutBack, inAperture, rand, segmentSphere, torusDistance, TAU } from '../engine/math.js';
 import { gyreCore, gyreEmitter, gyreFins, gyrePod, gyreRing, gyreShell, PALETTE, flareTexture, setFlash } from './models.js';
 import { cone, dirTo, fan, normalize, shell } from './patterns.js';
@@ -27,6 +28,7 @@ class Part {
   constructor(boss, object, { hp, radius, name, score, kind }) {
     this.boss = boss;
     this.object = object;
+    hp *= difficulty().enemyHp;
     this.hp = hp;
     this.maxHp = hp;
     this.radius = radius;
@@ -217,9 +219,9 @@ export class Gyre {
 
   /** Health fraction of the current phase (for the HUD bar) and overall progress. */
   get barValue() {
-    if (this.phase === 'crown') return this.pods.reduce((a, p) => a + p.hp, 0) / (BOSS_HP.pod * 4);
-    if (this.phase === 'lattice') return this.emitters.reduce((a, p) => a + p.hp, 0) / (BOSS_HP.emitter * 2);
-    if (this.phase === 'heart') return this.corePart.hp / BOSS_HP.core;
+    if (this.phase === 'crown') return this.pods.reduce((a, p) => a + p.hp, 0) / this.pods.reduce((a, p) => a + p.maxHp, 0);
+    if (this.phase === 'lattice') return this.emitters.reduce((a, p) => a + p.hp, 0) / this.emitters.reduce((a, p) => a + p.maxHp, 0);
+    if (this.phase === 'heart') return this.corePart.hp / this.corePart.maxHp;
     return this.phase === 'intro' ? this.unfold : 0;
   }
 
@@ -678,7 +680,7 @@ export class Gyre {
       this.eyeMat.uniforms.uTime.value = t;
       this.eyeMat.uniforms.uAlpha.value = Math.min(1, (this.eyeMat.uniforms.uAlpha.value || 0) + dt);
       // health thresholds
-      const f = this.corePart.hp / BOSS_HP.core;
+      const f = this.corePart.hp / this.corePart.maxHp;
       if (!this.rage && f < 0.55) { this.rage = true; g.onBossRage(); }
       if (!this.final && f < 0.2) { this.final = true; g.onBossFinal(); }
     } else {

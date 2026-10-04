@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { difficulty } from './difficulty.js';
 import { TAU } from '../engine/math.js';
 import { spawnBloom, spawnCarrier, spawnDart, spawnFormation, spawnLancer, spawnMine, spawnHornet, spawnWraith } from './enemies.js';
 import { rand } from '../engine/math.js';
@@ -181,7 +182,8 @@ export function minePos(g) {
  * hornets dive at you and wraiths hop around unpredictably. It escalates wave by wave.
  */
 export function* pressure(g, level) {
-  const mineEvery = [0, 6.5, 5.2, 4.6, 3.9][level];
+  const pr = difficulty().pressure;
+  const mineEvery = [0, 6.5, 5.2, 4.6, 3.9][level] / pr;
   const beams = [0, 2, 3, 3, 4][level];
   let tMine = level === 1 ? 7 : 3.5, tHornet = 9, tWraith = 6;
   while (true) {
@@ -192,8 +194,8 @@ export function* pressure(g, level) {
       spawnMine(g, minePos(g), { beams: level >= 4 && Math.random() < 0.5 ? 4 : beams, spin: rand(1.1, 1.6 + level * 0.15) });
     }
     if (tHornet <= 0 && level !== 2) {
-      tHornet = [0, 9, 0, 6, 6.5][level] * rand(0.85, 1.15);
-      const n = level >= 3 ? 3 : 2;
+      tHornet = ([0, 9, 0, 6, 6.5][level] / pr) * rand(0.85, 1.15);
+      const n = level >= 3 && pr >= 1 ? 3 : 2;
       for (let i = 0; i < n; i++) {
         const sd = (i % 2 ? 1 : -1);
         const m = mouth(g, sd > 0 ? 'right' : 'left');
@@ -202,8 +204,8 @@ export function* pressure(g, level) {
       }
     }
     if (tWraith <= 0 && level >= 2) {
-      tWraith = [0, 0, 7.5, 8, 6][level] * rand(0.85, 1.15);
-      const n = level >= 4 ? 2 : 1;
+      tWraith = ([0, 0, 7.5, 8, 6][level] / pr) * rand(0.85, 1.15);
+      const n = level >= 4 && pr >= 0.7 ? 2 : 1;
       for (let i = 0; i < n; i++) spawnWraith(g, mouth(g, Math.random() < 0.5 ? 'frontL' : 'frontR'), { hops: 5 + level });
     }
   }
