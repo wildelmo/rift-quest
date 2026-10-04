@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { clamp, easeInOutCubic, easeOutBack, inAperture, rand, segmentSphere, torusDistance, TAU } from '../engine/math.js';
 import { gyreCore, gyreEmitter, gyreFins, gyrePod, gyreRing, gyreShell, PALETTE, flareTexture, setFlash } from './models.js';
 import { cone, dirTo, fan, normalize, shell } from './patterns.js';
+import { spawnMine } from './enemies.js';
+import { minePos } from './stage.js';
 import { COLORS } from './fx.js';
 
 // THE GYRE - a living gyroscope that tears through the wall.
@@ -237,7 +239,9 @@ export class Gyre {
 
   // ------------------------------------------------------------------ lifecycle
 
-  begin() {
+  /** startPhase: 0 crown, 1 lattice, 2 heart (continuing after a game over resumes the phase). */
+  begin(startPhase = 0) {
+    this.startPhase = startPhase;
     const g = this.game;
     const rift = g.room.rifts.boss;
     const dist = rift.position.length();
@@ -273,7 +277,17 @@ export class Gyre {
     g.haptic(0.6, 200, 'both');
     yield 0.6;
     g.onBossReady();
-    this._startCrown();
+    if (this.startPhase >= 1) {
+      for (const p of this.pods) { p.alive = false; p.vulnerable = false; p.object.visible = false; }
+      this.outerRing.visible = false;
+    }
+    if (this.startPhase >= 2) {
+      for (const p of this.emitters) { p.alive = false; p.vulnerable = false; p.object.visible = false; }
+      this.midRing.visible = false;
+    }
+    if (this.startPhase === 2) this._startHeart();
+    else if (this.startPhase === 1) this._startLattice();
+    else this._startCrown();
   }
 
   _startCrown() {
@@ -282,6 +296,7 @@ export class Gyre {
     for (const p of this.pods) p.vulnerable = true;
     this.run(this._crownPods());
     this.run(this._crownCore());
+    this.run(this._mines(7, 2));
   }
 
   *_crownPods() {
@@ -343,6 +358,15 @@ export class Gyre {
     }
   }
 
+  /** Pivot mines warping in around the player during a phase. */
+  *_mines(every, beams) {
+    yield 3;
+    while (true) {
+      spawnMine(this.game, minePos(this.game), { beams: this.rage ? beams + 1 : beams });
+      yield every * (this.rage ? 0.75 : 1) * rand(0.85, 1.15);
+    }
+  }
+
   _startLattice() {
     const g = this.game;
     this.phase = 'lattice';
@@ -353,6 +377,7 @@ export class Gyre {
       for (const p of boss.emitters) p.vulnerable = true;
       boss.run(boss._latticeLasers());
       boss.run(boss._latticeBursts());
+      boss.run(boss._mines(9, 2));
     })(this));
   }
 
@@ -464,6 +489,7 @@ export class Gyre {
       boss.eye.visible = true;
       boss.run(boss._heartEye());
       boss.run(boss._heartVents());
+      boss.run(boss._mines(6.5, 2));
     })(this));
   }
 

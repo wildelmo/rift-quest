@@ -160,6 +160,7 @@ export class Game {
   startGame(fromWave = 0, keepScore = false) {
     this._resetWorld();
     if (!keepScore) {
+      this.bossStartPhase = 0;
       this.score = 0;
       this.stats = { kills: 0, deaths: 0, bombsUsed: 0, started: this.time, noMissWaves: 0 };
       this.grazes = 0;
@@ -358,6 +359,8 @@ export class Game {
     if (newHigh) { this.hiScore = Math.floor(this.score); saveHi(this.hiScore); }
     const atBoss = this.boss && this.boss.phase !== 'dormant';
     this.continueFrom = atBoss ? WAVES.length : this.waveIndex;
+    // continuing at the boss resumes the phase you reached
+    this.bossStartPhase = atBoss ? Math.min(2, this.boss.phaseIndex) : 0;
     this.hud.showPanel('gameover', {
       score: this.score, newHigh,
       prompt: 'POINT AT THE MENU AND PULL THE TRIGGER',
@@ -407,7 +410,9 @@ export class Game {
 
   onEnemyDamaged(e, dmg, point) {
     const p = point || e.pos;
-    if (Math.random() < 0.5) this.fx.sparks(p, 2, COLORS.amber, 0.4, { sizeScale: 0.8, lifeScale: 0.6 });
+    // every hit lands visibly: a bright impact flare and a few sparks
+    this.fx.spawn({ x: p.x, y: p.y, z: p.z, life: 0.07, size: 0.028, size1: 0.012, color: COLORS.white, color1: COLORS.cyan, shape: SHAPE.STAR, additive: 0.85, rot: Math.random() * 3 });
+    this.fx.sparks(p, 3, COLORS.cyan, 0.45, { sizeScale: 0.8, lifeScale: 0.5 });
     this.sfx.play('hit', this.worldPos(p), { vol: 0.35, minGap: 0.04 });
     if (e.kind === 'pod' || e.kind === 'emitter' || e.kind === 'core') this.score += Math.round(dmg * 10);
   }
@@ -446,16 +451,27 @@ export class Game {
 
   onPickup(p) {
     const ship = this.ship;
-    let label = CAPSULES[p.type].name;
+    let title = CAPSULES[p.type].name, what = '';
     let ok = true;
-    if (p.type === 'P') ok = ship.addLevel();
-    else if (p.type === 'O') ok = ship.addOption();
-    else if (p.type === 'S') { ok = !ship.shield; ship.shield = true; }
-    else if (p.type === 'B') { ship.bombs = Math.min(9, ship.bombs + 1); }
-    if (!ok) { label = '+5,000'; this.score += 5000; }
-    if (p.type === 'P' && ok && ship.level === 3) label = 'POWER UP · SEEKERS';
-    if (p.type === 'P' && ok && ship.level === 4) label = 'MAX POWER';
-    this.hud.popup(label, p.pos.clone().add(_v.set(0, 0.03, 0)), CAPSULES[p.type].css, '#ffffff', 1.1);
+    if (p.type === 'P') {
+      ok = ship.addLevel();
+      title = ['', 'TWIN BLASTER', 'SPREAD SHOT', 'HOMING SEEKERS', 'MAX POWER'][ship.level];
+      what = ['', '', 'extra angled shots', 'missiles hunt the nearest enemy', 'heavy bolts, 5-way spread'][ship.level];
+    } else if (p.type === 'O') {
+      ok = ship.addOption();
+      title = `OPTION DRONE ×${ship.optionCount}`;
+      what = 'trails your path and copies your fire';
+    } else if (p.type === 'S') {
+      ok = !ship.shield;
+      ship.shield = true;
+      what = 'blocks one hit';
+    } else if (p.type === 'B') {
+      ship.bombs = Math.min(9, ship.bombs + 1);
+      what = 'press A / X to clear the screen';
+    }
+    if (!ok) { title = 'BONUS +5,000'; what = ''; this.score += 5000; }
+    this.hud.showHint(what ? `${title}  —  ${what}` : title, 2.6);
+    this.hud.popup(title, p.pos.clone().add(_v.set(0, 0.03, 0)), CAPSULES[p.type].css, '#ffffff', 1.1);
     this.sfx.play(p.type === 'S' ? 'shield' : 'powerup', null, { vol: 0.9 });
     this.fx.ring(p.pos, 0.1, COLORS.gold, 0.35);
     this.fx.sparks(p.pos, 14, COLORS.gold, 0.5, { gravity: 0 });
@@ -716,7 +732,7 @@ export class Game {
         const r = t.radius * 0.8 + SHIP.hitRadius;
         if (t.pos.distanceToSquared(ship.pos) < r * r) {
           this.shipHit();
-          if (t.kind === 'mite' || t.kind === 'dart') t.kill();
+          if (t.kind === 'mite' || t.kind === 'dart' || t.kind === 'hornet' || t.kind === 'mine') t.kill();
           break;
         }
       }

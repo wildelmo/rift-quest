@@ -42,6 +42,10 @@ Turn your off-hand wrist toward you to see a wrist display with your score, ship
   - **O** adds an *Option* drone that follows your hand's path, up to three.
   - **S** gives you a shield.
   - **B** gives you an extra bomb.
+- **Hazards.** Pivot mines warp in right next to your ship, blink while arming, then sweep
+  rotating lasers around their pivot before bursting into a ring of bullets. Shoot them first
+  to disarm them. Hornets flare a warning and then dive straight at you, and wraiths hop
+  unpredictably around the room while firing fans.
 - **Chains.** Kill enemies in quick succession to build a score multiplier, up to ×16. When you
   destroy a big enemy, the bullets around it turn into gold stars that fly into your ship.
 - **The Gyre** has three phases:

@@ -18,7 +18,7 @@ try {
     const cond = {
       intro: s.phase === 'intro', crown: s.phase === 'crown' && s.bullets > 60, 'lattice-laser': s.phase === 'lattice' && s.lasers > 0,
       'heart-bullets': s.phase === 'heart' && s.bullets > 150, dying: s.phase === 'dying', victory: s.state === 'victory',
-      swarm: s.mites > 25, wave: s.enemies > 3 && s.bullets > 10, bloom: s.bullets > 60,
+      swarm: s.mites > 25, wave: s.enemies > 3 && s.bullets > 10, bloom: s.bullets > 60, mine: s.lasers >= 2 && s.phase === 'dormant',
     }[want[0]];
     if (cond) {
       await page.screenshot({ path: `${out}/${tag}-${want[0]}.png` });

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TAU } from '../engine/math.js';
-import { spawnBloom, spawnCarrier, spawnDart, spawnFormation, spawnLancer } from './enemies.js';
+import { spawnBloom, spawnCarrier, spawnDart, spawnFormation, spawnLancer, spawnMine, spawnHornet, spawnWraith } from './enemies.js';
+import { rand } from '../engine/math.js';
 
 // Stage 1 - "Living Room Breach". Four short, escalating waves with breathers, then THE GYRE.
 // All coordinates are arena-local: the origin is where your hand naturally rests, -Z is
@@ -17,6 +18,8 @@ export const WAVES = [
 
 /** Wait until every spawned enemy of the wave is gone (killed or escaped), with a timeout. */
 function* clearOrTimeout(g, timeout) {
+  // the scripted part of the wave is over: stop the pressure layer so the wave can be cleared
+  if (g.pressureTask) { g.pressureTask.cancel(); g.pressureTask = null; }
   let t = 0;
   while (t < timeout) {
     if (!g.hasHostiles()) return;
@@ -158,15 +161,65 @@ function* wave4(g) {
   yield* clearOrTimeout(g, 10);
 }
 
+/** A spot near the ship (but never on it) where a pivot mine warps in. */
+export function minePos(g) {
+  const s = g.ship.pos;
+  const p = V(0, 0, 0);
+  for (let i = 0; i < 12; i++) {
+    const a = rand(0, TAU), r = rand(0.18, 0.32);
+    p.set(s.x + Math.cos(a) * r, s.y + Math.sin(a) * r * 0.75, s.z - rand(0.06, 0.24));
+    p.x = Math.max(-0.45, Math.min(0.45, p.x));
+    p.y = Math.max(-0.22, Math.min(0.38, p.y));
+    p.z = Math.max(-0.55, Math.min(0.05, p.z));
+    if (p.distanceTo(s) > 0.17) break;
+  }
+  return p;
+}
+
+/**
+ * Pressure layer that runs alongside each wave's script: pivot mines warp in near you,
+ * hornets dive at you and wraiths hop around unpredictably. It escalates wave by wave.
+ */
+export function* pressure(g, level) {
+  const mineEvery = [0, 6.5, 5.2, 4.6, 3.9][level];
+  const beams = [0, 2, 3, 3, 4][level];
+  let tMine = level === 1 ? 7 : 3.5, tHornet = 9, tWraith = 6;
+  while (true) {
+    yield 0.25;
+    tMine -= 0.25; tHornet -= 0.25; tWraith -= 0.25;
+    if (tMine <= 0) {
+      tMine = mineEvery * rand(0.85, 1.15);
+      spawnMine(g, minePos(g), { beams: level >= 4 && Math.random() < 0.5 ? 4 : beams, spin: rand(1.1, 1.6 + level * 0.15) });
+    }
+    if (tHornet <= 0 && level !== 2) {
+      tHornet = [0, 9, 0, 6, 6.5][level] * rand(0.85, 1.15);
+      const n = level >= 3 ? 3 : 2;
+      for (let i = 0; i < n; i++) {
+        const sd = (i % 2 ? 1 : -1);
+        const m = mouth(g, sd > 0 ? 'right' : 'left');
+        spawnHornet(g, m, [around(70 * sd, rand(0, 30), 0.75), around(rand(20, 45) * sd, rand(-5, 20), 0.58)], { travel: rand(1.8, 2.4) });
+        yield 0.3;
+      }
+    }
+    if (tWraith <= 0 && level >= 2) {
+      tWraith = [0, 0, 7.5, 8, 6][level] * rand(0.85, 1.15);
+      const n = level >= 4 ? 2 : 1;
+      for (let i = 0; i < n; i++) spawnWraith(g, mouth(g, Math.random() < 0.5 ? 'frontL' : 'frontR'), { hops: 5 + level });
+    }
+  }
+}
+
 /** The full stage: waves with breathers, then the boss. Yields until the boss is defeated. */
 export function* stage(g, startAt = 0) {
   for (let i = startAt; i < WAVES.length; i++) {
     const w = WAVES[i];
     g.beginWave(w);
-    yield 2.2;
+    yield 2.0;
+    g.pressureTask = g.scheduler.start(pressure(g, w.id));
     yield* w.script(g);
+    if (g.pressureTask) { g.pressureTask.cancel(); g.pressureTask = null; }
     g.endWave(w);
-    yield 6.0; // breather
+    yield 4.5; // breather
   }
   yield* bossFight(g);
 }
@@ -174,7 +227,7 @@ export function* stage(g, startAt = 0) {
 export function* bossFight(g) {
   g.beginBossWarning();
   yield 5.2;
-  g.boss.begin();
+  g.boss.begin(g.bossStartPhase || 0);
   yield () => g.boss.defeated;
   yield 2.5;
 }

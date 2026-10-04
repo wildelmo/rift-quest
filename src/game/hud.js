@@ -73,7 +73,7 @@ export class Hud {
     this.panelKind = null;
 
     // --- small hint label that floats near the ship
-    this.hint = new TextPanel(0.3, 0.04, 1600, { depthTest: false, renderOrder: 41 });
+    this.hint = new TextPanel(0.44, 0.05, 1600, { depthTest: false, renderOrder: 41 });
     this.hint.opacity = 0;
     this.root.add(this.hint.mesh);
     this.hintText = '';
@@ -317,7 +317,7 @@ export class Hud {
     }
     // power pips
     const px = w * 0.86;
-    drawText(ctx, `PWR ${ship.level}`, px, h * 0.3, { size: 20, align: 'left', italic: false, weight: 800, color: '#ffb36a', glow: null, spacing: 0.1 });
+    drawText(ctx, ['', 'TWIN', 'SPREAD', 'SEEKER', 'MAX'][ship.level], px, h * 0.3, { size: 20, align: 'left', italic: false, weight: 800, color: '#ffb36a', glow: null, spacing: 0.1 });
     drawText(ctx, `OPT ${ship.optionCount}${ship.shield ? ' ◈' : ''}`, px, h * 0.68, { fit: w - px - 24, size: 22, align: 'left', italic: false, weight: 800, color: '#ffd23a', glow: null, spacing: 0.06 });
     p.commit();
   }

@@ -7,15 +7,19 @@ import { COLORS } from './fx.js';
 
 export const BULLET = {
   // [sprite size (quad width incl. halo), hit radius, colour]. The lit ball is ~56% of the sprite.
-  small: [0.04, 0.0075, COLORS.red],
-  medium: [0.05, 0.011, COLORS.red],
-  large: [0.09, 0.02, COLORS.red],
-  huge: [0.15, 0.034, COLORS.red],
-  rice: [0.03, 0.0065, COLORS.pink],
-  amber: [0.036, 0.0075, COLORS.orange],
-  red: [0.04, 0.009, COLORS.red],
-  violet: [0.05, 0.011, COLORS.violet],
+  // Different patterns use different looks so overlapping streams stay readable.
+  small: [0.026, 0.0055, COLORS.red],
+  medium: [0.036, 0.0078, COLORS.magenta],
+  large: [0.06, 0.013, COLORS.violet],
+  huge: [0.1, 0.022, COLORS.red],
+  rice: [0.022, 0.005, COLORS.orange],
+  amber: [0.028, 0.006, COLORS.orange],
+  red: [0.03, 0.0065, COLORS.red],
+  violet: [0.036, 0.0078, COLORS.violet],
 };
+
+/** Global bullet speed multiplier (difficulty knob). */
+export const BULLET_SPEED = 1.45;
 
 class Bullet {
   constructor() {
@@ -47,7 +51,8 @@ export class EnemyBullets {
     const k = typeof kind === 'string' ? BULLET[kind] : kind;
     b.alive = true;
     b.x = x; b.y = y; b.z = z;
-    b.vx = vx; b.vy = vy; b.vz = vz;
+    const spd = opts.rawSpeed ? 1 : BULLET_SPEED;
+    b.vx = vx * spd; b.vy = vy * spd; b.vz = vz * spd;
     b.size = k[0];
     b.radius = k[1];
     b.color = opts.color || k[2];
@@ -58,7 +63,7 @@ export class EnemyBullets {
     b.turn = opts.turn || 0; // rad/s around turnAxis
     b.turnAxis = opts.turnAxis || null;
     b.aimAt = opts.aimAt ?? -1; // seconds after spawn to re-aim at the ship
-    b.aimSpeed = opts.aimSpeed ?? 0.5;
+    b.aimSpeed = (opts.aimSpeed ?? 0.5) * BULLET_SPEED;
     b.age = 0;
     b.life = opts.life ?? 14;
     b.grazed = false;

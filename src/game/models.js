@@ -436,6 +436,34 @@ export function buildCarrier() {
   return b.build({ metalness: 0.65, roughness: 0.32, unique: true, uvDensity: 10, envIntensity: 1.5 });
 }
 
+/** Pivot mine: spiked armoured core with laser emitter prongs around a hot eye. ~5 cm. */
+export function buildMine(prongs = 3) {
+  const b = new ModelBuilder();
+  b.add(new THREE.IcosahedronGeometry(0.013, 0), DR.gun);
+  b.add(new THREE.TorusGeometry(0.0145, 0.0022, 6, 18), DR.light, { smooth: true });
+  for (let i = 0; i < prongs; i++) {
+    const a = (i / prongs) * Math.PI * 2;
+    const arm = rbox(0.006, 0.02, 0.006, 0.0015);
+    arm.translate(0, 0.02, 0);
+    arm.rotateZ(a);
+    b.add(arm, DR.mid);
+    const tip = new THREE.OctahedronGeometry(0.004, 0);
+    tip.translate(0, 0.032, 0);
+    tip.rotateZ(a);
+    b.add(tip, DR.red, { glow: true });
+  }
+  for (let i = 0; i < 6; i++) {
+    const spike = taper(0.0025, 0.0, 0.012, 4);
+    spike.rotateX(Math.PI / 2);
+    spike.translate(0, 0.018, 0);
+    spike.rotateX(Math.PI / 2);
+    spike.rotateY((i / 6) * Math.PI * 2);
+    b.add(spike, DR.dark);
+  }
+  b.add(new THREE.SphereGeometry(0.0062, 12, 8), DR.red, { pos: [0, 0, 0.011], scale: [1, 1, 0.6], glow: true });
+  return b.build({ metalness: 0.65, roughness: 0.32, unique: true, uvDensity: 18, envIntensity: 1.5 });
+}
+
 /** Power capsule (Gradius style): a glowing gem in a cage. */
 export function buildCapsule(color) {
   const b = new ModelBuilder();

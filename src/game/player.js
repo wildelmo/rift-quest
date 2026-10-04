@@ -9,8 +9,8 @@ import { COLORS } from './fx.js';
 export const SHIP = {
   hitRadius: 0.0055,
   grazeRadius: 0.03,
-  fireRate: 16,
-  boltSpeed: 5.2,
+  fireRate: 12,
+  boltSpeed: 3.4,
   maxOptions: 3,
   maxLevel: 4,
   optionSpacing: 12, // history samples (5 mm each) between options
@@ -136,20 +136,47 @@ export class Trail {
   }
 }
 
+/**
+ * Player projectiles are real 3D glowing bolts (instanced capsules), not flat sprites: you fire
+ * away from your own eyes, so a sprite streak would collapse to a dot. A bright core, a coloured
+ * glow sheath and a halo sprite keep every shot readable as it flies into the room.
+ */
 export class PlayerShots {
   constructor(parent) {
-    this.sprites = new Billboards(900, { renderOrder: 15 });
+    this.sprites = new Billboards(1400, { renderOrder: 15 });
     parent.add(this.sprites.mesh);
     this.live = [];
+    this.max = 800;
+    const geo = new THREE.CapsuleGeometry(0.5, 1, 4, 10);
+    geo.rotateX(Math.PI / 2); // along Z
+    this.core = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }), this.max);
+    this.sheath = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, transparent: true, opacity: 0.5, depthWrite: false }), this.max);
+    for (const m of [this.core, this.sheath]) {
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      m.setColorAt(0, new THREE.Color(1, 1, 1));
+      m.instanceColor.setUsage(THREE.DynamicDrawUsage);
+      m.frustumCulled = false;
+      m.count = 0;
+      parent.add(m);
+    }
+    this.core.renderOrder = 15;
+    this.sheath.renderOrder = 16;
+    this._m = new THREE.Matrix4();
+    this._q = new THREE.Quaternion();
+    this._p = new THREE.Vector3();
+    this._s = new THREE.Vector3();
+    this._d = new THREE.Vector3();
+    this._z = new THREE.Vector3(0, 0, 1);
+    this._c = new THREE.Color();
   }
 
   spawn(o) {
-    if (this.live.length > 700) return null;
+    if (this.live.length >= this.max - 2) return null;
     const s = {
       x: o.x, y: o.y, z: o.z, px: o.x, py: o.y, pz: o.z,
-      vx: o.vx, vy: o.vy, vz: o.vz, dmg: o.dmg ?? 1, radius: o.radius ?? 0.006, kind: o.kind || 'bolt',
-      pierce: o.pierce || false, life: o.life ?? 1.4, age: 0, hits: o.pierce ? new Set() : null,
-      size: o.size ?? 0.0065, color: o.color || COLORS.cyan, target: null, dead: false, charge: o.charge || 0,
+      vx: o.vx, vy: o.vy, vz: o.vz, dmg: o.dmg ?? 1, radius: o.radius ?? 0.008, kind: o.kind || 'bolt',
+      pierce: o.pierce || false, life: o.life ?? 1.5, age: 0, hits: o.pierce ? new Set() : null,
+      size: o.size ?? 0.007, length: o.length ?? 0.05, color: o.color || COLORS.cyan, target: null, dead: false,
     };
     this.live.push(s);
     return s;
@@ -170,12 +197,10 @@ export class PlayerShots {
           const k = 1 - Math.exp(-7 * dt);
           s.vx += (_v.x - s.vx) * k; s.vy += (_v.y - s.vy) * k; s.vz += (_v.z - s.vz) * k;
         }
-        const ns = Math.min(sp + 3 * dt, 2.6);
+        const ns = Math.min(sp + 3 * dt, 2.4);
         const l = Math.hypot(s.vx, s.vy, s.vz) || 1;
         s.vx *= ns / l; s.vy *= ns / l; s.vz *= ns / l;
-        if (Math.random() < 0.6) fx.spawn({ x: s.x, y: s.y, z: s.z, vx: rand(-0.02, 0.02), vy: 0.02, vz: rand(-0.02, 0.02), life: 0.35, size: 0.005, size1: 0.012, color: [0.9, 0.9, 1], shape: SHAPE.SMOKE, additive: 0, alpha: 0.35 });
-      } else if (s.kind === 'wave' && Math.random() < 0.9) {
-        fx.spawn({ x: s.x + rand(-1, 1) * s.radius, y: s.y + rand(-1, 1) * s.radius, z: s.z + rand(-1, 1) * s.radius, vx: s.vx * 0.05, vy: s.vy * 0.05, vz: s.vz * 0.05, life: 0.25, size: s.radius * 0.6, size1: 0.002, color: COLORS.white, color1: COLORS.cyan, shape: SHAPE.SPARK, additive: 0.7 });
+        if (Math.random() < 0.7) fx.spawn({ x: s.x, y: s.y, z: s.z, vx: rand(-0.02, 0.02), vy: 0.02, vz: rand(-0.02, 0.02), life: 0.4, size: 0.006, size1: 0.016, color: [0.85, 0.88, 0.95], shape: SHAPE.SMOKE, additive: 0, alpha: 0.4 });
       }
       s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
       this.live[w++] = s;
@@ -186,18 +211,34 @@ export class PlayerShots {
   render() {
     const b = this.sprites;
     b.begin();
+    let n = 0;
     for (const s of this.live) {
+      if (n >= this.max) break;
       const [r, g, bl] = s.color;
-      if (s.kind === 'wave') {
-        const pulse = 1 + 0.12 * Math.sin(s.age * 50);
-        b.push(s.x, s.y, s.z, s.radius * 3.2 * pulse, r, g, bl, 0.8, SHAPE.GLOW, 0.6);
-        b.push(s.x, s.y, s.z, s.radius * 1.6, r, g, bl, 1, SHAPE.BOLT, 0.2, s.vx, s.vy, s.vz, 0.05);
-      } else if (s.kind === 'missile') {
-        b.push(s.x, s.y, s.z, 0.006, 1, 0.75, 0.3, 1, SHAPE.BOLT, 0.2, s.vx, s.vy, s.vz, 0.02);
-      } else {
-        b.push(s.x, s.y, s.z, s.size * 2.6, r, g, bl, 0.45, SHAPE.GLOW, 0.85, s.vx, s.vy, s.vz, 0.05);
-        b.push(s.x, s.y, s.z, s.size, r, g, bl, 1, SHAPE.BOLT, 0.3, s.vx, s.vy, s.vz, 0.06);
-      }
+      // grow out of the muzzle over the first few centimetres
+      const grow = Math.min(1, s.age / 0.04);
+      const len = s.length * (0.35 + 0.65 * grow);
+      this._d.set(s.vx, s.vy, s.vz).normalize();
+      this._q.setFromUnitVectors(this._z, this._d);
+      // centre the bolt slightly behind its tip
+      this._p.set(s.x - this._d.x * len * 0.4, s.y - this._d.y * len * 0.4, s.z - this._d.z * len * 0.4);
+      this._s.set(s.size, s.size, len);
+      this._m.compose(this._p, this._q, this._s);
+      this.core.setMatrixAt(n, this._m);
+      this.core.setColorAt(n, this._c.setRGB(0.55 + r * 0.45, 0.55 + g * 0.45, 0.55 + bl * 0.45));
+      this._s.set(s.size * 2.4, s.size * 2.4, len * 1.25);
+      this._m.compose(this._p, this._q, this._s);
+      this.sheath.setMatrixAt(n, this._m);
+      this.sheath.setColorAt(n, this._c.setRGB(r, g, bl));
+      n++;
+      // halo at the head of the bolt + a faint motion streak
+      b.push(s.x, s.y, s.z, s.size * 6, r, g, bl, 0.55, SHAPE.GLOW, 0.85);
+      b.push(s.x, s.y, s.z, s.size * 2.2, r, g, bl, 0.5, SHAPE.SPARK, 0.85, s.vx, s.vy, s.vz, 0.035);
+    }
+    this.core.count = this.sheath.count = n;
+    for (const m of [this.core, this.sheath]) {
+      m.instanceMatrix.needsUpdate = true;
+      m.instanceColor.needsUpdate = true;
     }
     b.end();
   }
@@ -446,32 +487,37 @@ export class Ship {
     });
   }
 
-  _bolt(localX, localY, localZ, dir, dmg, size = 0.0065, color = COLORS.cyan) {
+  _bolt(localX, localY, localZ, dir, dmg, size = 0.0065, color = COLORS.cyan, length = 0.05) {
     _v.set(localX, localY, localZ).applyQuaternion(this.quat).add(this.pos);
     const sp = SHIP.boltSpeed;
-    this.shots.spawn({ x: _v.x, y: _v.y, z: _v.z, vx: dir.x * sp, vy: dir.y * sp, vz: dir.z * sp, dmg, size, color });
+    this.shots.spawn({ x: _v.x, y: _v.y, z: _v.z, vx: dir.x * sp, vy: dir.y * sp, vz: dir.z * sp, dmg, size, color, length });
   }
 
   _volley(ctx) {
     const fwd = this.forward;
     const dir = ctx.aimAssist ? ctx.aimAssist(this.pos, fwd) : fwd;
     const L = this.level;
-    const dmg = L >= 4 ? 1.35 : 1;
-    const size = L >= 4 ? 0.012 : 0.009;
-    this._bolt(0.011, -0.007, -0.058, dir, dmg, size);
-    this._bolt(-0.011, -0.007, -0.058, dir, dmg, size);
+    // TWIN BLASTER -> SPREAD -> SEEKERS -> MAX: each level is visibly different
+    const max = L >= 4;
+    const dmg = max ? 1.4 : 1;
+    const size = max ? 0.0085 : 0.0065;
+    const col = max ? COLORS.white : COLORS.cyan;
+    this._bolt(0.011, -0.007, -0.058, dir, dmg, size, col, max ? 0.07 : 0.05);
+    this._bolt(-0.011, -0.007, -0.058, dir, dmg, size, col, max ? 0.07 : 0.05);
     if (L >= 2) {
       const up = _v2.set(0, 1, 0).applyQuaternion(this.quat);
-      const angles = L >= 4 ? [0.12, -0.12, 0.24, -0.24] : [0.12, -0.12];
+      const angles = max ? [0.19, -0.19, 0.38, -0.38] : [0.19, -0.19];
       for (const a of angles) {
         const d = dir.clone().applyAxisAngle(up, a);
-        this._bolt(0, -0.004, -0.06, d, 0.7, 0.007, COLORS.blue);
+        this._bolt(0, -0.004, -0.06, d, 0.75, 0.0055, COLORS.blue, 0.04);
       }
     }
+    // option drones copy every volley with amber bolts
     for (let i = 0; i < this.optionCount; i++) {
       const p = this.optionPos(i, _v);
       const od = ctx.aimAssist ? ctx.aimAssist(p, fwd) : fwd;
-      this.shots.spawn({ x: p.x, y: p.y, z: p.z, vx: od.x * SHIP.boltSpeed, vy: od.y * SHIP.boltSpeed, vz: od.z * SHIP.boltSpeed, dmg: 0.75, size: 0.006, color: COLORS.amber });
+      this.shots.spawn({ x: p.x, y: p.y, z: p.z, vx: od.x * SHIP.boltSpeed, vy: od.y * SHIP.boltSpeed, vz: od.z * SHIP.boltSpeed, dmg: 0.75, size: 0.0058, length: 0.042, color: COLORS.amber });
+      this.fx.spawn({ x: p.x, y: p.y, z: p.z, life: 0.05, size: 0.02, size1: 0.006, color: COLORS.white, color1: COLORS.amber, shape: SHAPE.STAR, additive: 0.85, rot: Math.random() * 3 });
     }
     // muzzle flashes at both cannons + a light recoil tick in the hand
     for (const sx of [-1, 1]) {
@@ -487,7 +533,7 @@ export class Ship {
     for (const sx of [-1, 1]) {
       _v.set(0.02 * sx, -0.004, 0).applyQuaternion(this.quat).add(this.pos);
       _v2.set(sx * 0.6, 0.3, -1).normalize().applyQuaternion(this.quat).multiplyScalar(0.9);
-      this.shots.spawn({ x: _v.x, y: _v.y, z: _v.z, vx: _v2.x, vy: _v2.y, vz: _v2.z, dmg: 2.2, kind: 'missile', life: 2.2, radius: 0.008 });
+      this.shots.spawn({ x: _v.x, y: _v.y, z: _v.z, vx: _v2.x, vy: _v2.y, vz: _v2.z, dmg: 2.2, kind: 'missile', life: 2.2, radius: 0.008, size: 0.006, length: 0.028, color: COLORS.orange });
     }
   }
 

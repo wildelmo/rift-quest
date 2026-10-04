@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { catmullRom, clamp, rand, segmentSphere, TAU, easeInOutCubic } from '../engine/math.js';
-import { buildDart, buildBloom, buildLancer, buildCarrier, buildCapsule, miteGeometries, hullMaterial, getGlowMaterial, PALETTE, setFlash } from './models.js';
+import { buildDart, buildBloom, buildLancer, buildCarrier, buildCapsule, buildMine, miteGeometries, hullMaterial, getGlowMaterial, PALETTE, setFlash } from './models.js';
 import { cone, dirTo, fan, normalize, shell } from './patterns.js';
 import { COLORS } from './fx.js';
+import { SHAPE } from '../engine/billboards.js';
+const SHAPE_GLOW = SHAPE.GLOW;
 import { makeCanvas, drawText } from '../engine/text.js';
 
 const _v = new THREE.Vector3();
@@ -10,6 +12,9 @@ const _v2 = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _up = new THREE.Vector3(0, 1, 0);
+
+/** Scripted paths run at this fraction of their authored duration (lower = faster enemies). */
+export const PACE = 0.68;
 
 /** Base enemy: a model in the arena with hp, a collider sphere and scripted behaviour. */
 export class Enemy {
@@ -39,6 +44,8 @@ export class Enemy {
     this.dropCapsule = false;
     this.formation = null;
     this.hull = model.userData.hull;
+    this.jink = null; // { amp, freq } erratic wobble layered on top of the scripted path
+    this.jinkOff = new THREE.Vector3();
     game.enemies.push(this);
   }
 
@@ -84,7 +91,17 @@ export class Enemy {
   update(dt) {
     this.t += dt;
     this.prev.copy(this.pos);
+    this.pos.sub(this.jinkOff);
     if (this.mover) this.mover(dt);
+    if (this.jink) {
+      const j = this.jink, t = this.t * j.freq;
+      this.jinkOff.set(
+        j.amp * (Math.sin(t + j.p0) + 0.5 * Math.sin(t * 2.3 + j.p1)),
+        j.amp * 0.8 * (Math.sin(t * 1.37 + j.p1) + 0.4 * Math.sin(t * 3.1 + j.p0)),
+        j.amp * 0.5 * Math.sin(t * 0.71 + j.p2),
+      );
+    }
+    this.pos.add(this.jinkOff);
     if (dt > 0) this.vel.subVectors(this.pos, this.prev).divideScalar(dt);
     const ship = this.game.ship;
     if (this.faceShip) {
@@ -134,7 +151,11 @@ export class Enemy {
   }
 
   /** Shoot a bullet from this enemy toward the ship. */
-  shootAt(speed = 0.45, kind = 'small', opts = {}) {
+  setJink(amp, freq) {
+    this.jink = { amp, freq, p0: rand(0, TAU), p1: rand(0, TAU), p2: rand(0, TAU) };
+  }
+
+  shootAt(speed = 0.5, kind = 'small', opts = {}) {
     const g = this.game;
     const from = this.muzzle ? this.muzzle(_v2) : this.pos;
     const d = dirTo(from, g.ship.pos);
@@ -146,16 +167,22 @@ export class Enemy {
 // ------------------------------------------------------------------ dart
 
 export function spawnDart(game, points, duration, opts = {}) {
-  const e = new Enemy(game, buildDart(), { hp: opts.hp ?? 2.5, radius: 0.032, score: 100, kind: 'dart' });
+  const e = new Enemy(game, buildDart(), { hp: opts.hp ?? 4, radius: 0.024, score: 100, kind: 'dart' });
+  e.model.scale.setScalar(0.72);
   catmullRom(points, 0, e.pos);
-  e.followPath(points, duration, { done: () => e.remove() });
+  e.followPath(points, duration * PACE, { done: () => e.remove() });
+  e.setJink(opts.jink ?? 0.03, opts.jinkFreq ?? rand(2, 3.2));
   if (opts.shots) {
     e.run((function* () {
-      yield opts.firstShot ?? rand(0.9, 1.8);
+      yield (opts.firstShot ?? rand(0.6, 1.2)) * PACE;
       for (let i = 0; i < opts.shots; i++) {
-        if (e.pos.z > -0.45) break; // never shoot point-blank
-        e.shootAt(opts.speed ?? 0.42, opts.kind ?? 'small');
-        yield opts.interval ?? rand(0.9, 1.4);
+        if (e.pos.distanceTo(game.ship.pos) < 0.28) break; // never shoot point-blank
+        // a quick 3-round burst
+        for (let k = 0; k < (opts.burst ?? 3); k++) {
+          e.shootAt(opts.speed ?? 0.5, opts.kind ?? 'amber');
+          yield 0.08;
+        }
+        yield (opts.interval ?? rand(0.7, 1.1)) * PACE;
       }
     })());
   }
@@ -182,7 +209,8 @@ export function spawnFormation(game, count, makePath, duration, { spacing = 0.22
 
 export function spawnBloom(game, from, station, opts = {}) {
   const model = buildBloom();
-  const e = new Enemy(game, model, { hp: opts.hp ?? 26, radius: 0.05, score: 1000, kind: 'bloom', explodeScale: 2.2 });
+  const e = new Enemy(game, model, { hp: opts.hp ?? 30, radius: 0.04, score: 1000, kind: 'bloom', explodeScale: 2.2 });
+  model.scale.setScalar(0.72);
   e.pos.copy(from);
   e.faceVel = false;
   e.faceShip = true;
@@ -212,7 +240,7 @@ export function spawnBloom(game, from, station, opts = {}) {
         // a rotating spiral flower that blooms towards the player: hollow cone around the aim
         const arms = opts.arms ?? 3;
         const dirs = cone(aim, arms, opts.cone ?? 0.5, phase);
-        for (const d of dirs) game.bullets.spawn(e.pos.x, e.pos.y, e.pos.z, d.x * 0.36, d.y * 0.36, d.z * 0.36, opts.kind ?? 'small');
+        for (const d of dirs) game.bullets.spawn(e.pos.x, e.pos.y, e.pos.z, d.x * 0.38, d.y * 0.38, d.z * 0.38, opts.kind ?? 'small');
         phase += opts.phaseStep ?? 0.33;
         game.sfx.play('enemyShot', game.worldPos(e.pos), { vol: 0.25, minGap: 0.12 });
         // big slow energy balls that drift through the room
@@ -245,12 +273,13 @@ export function spawnBloom(game, from, station, opts = {}) {
 // ------------------------------------------------------------------ lancer (laser frigate)
 
 export function spawnLancer(game, from, station, opts = {}) {
-  const e = new Enemy(game, buildLancer(), { hp: opts.hp ?? 32, radius: 0.05, score: 1500, kind: 'lancer', explodeScale: 2.2 });
+  const e = new Enemy(game, buildLancer(), { hp: opts.hp ?? 36, radius: 0.04, score: 1500, kind: 'lancer', explodeScale: 2.2 });
+  e.model.scale.setScalar(0.75);
   e.pos.copy(from);
   e.faceVel = true;
   e.dropCapsule = opts.drop ?? false;
   e.cancelRadius = 0.2;
-  e.muzzle = (out) => out.set(0, 0, -0.07).applyQuaternion(e.group.quaternion).add(e.pos);
+  e.muzzle = (out) => out.set(0, 0, -0.055).applyQuaternion(e.group.quaternion).add(e.pos);
   e.moveTo(station, opts.travel ?? 2.0);
   e.run((function* () {
     yield (opts.travel ?? 2.0) + 0.2;
@@ -262,7 +291,7 @@ export function spawnLancer(game, from, station, opts = {}) {
       const a0 = vertical ? { x: game.ship.pos.x, y: 0.32 * sgn, z: 0.05 } : { x: -0.45 * sgn, y: game.ship.pos.y, z: 0.05 };
       const a1 = vertical ? { x: a0.x, y: -0.34 * sgn, z: 0.05 } : { x: 0.45 * sgn, y: a0.y, z: 0.05 };
       let tt = 0;
-      const warn = 0.9, fire = 1.7;
+      const warn = 0.7, fire = 1.3;
       const target = new THREE.Vector3();
       game.sfx.play('laserCharge', game.worldPos(e.pos), { vol: 0.8 });
       let hum = null;
@@ -299,7 +328,8 @@ export function spawnLancer(game, from, station, opts = {}) {
 // ------------------------------------------------------------------ carrier (armoured mothership)
 
 export function spawnCarrier(game, from, station, opts = {}) {
-  const e = new Enemy(game, buildCarrier(), { hp: opts.hp ?? 110, radius: 0.11, score: 4000, kind: 'carrier', explodeScale: 3.5 });
+  const e = new Enemy(game, buildCarrier(), { hp: opts.hp ?? 150, radius: 0.08, score: 4000, kind: 'carrier', explodeScale: 3.5 });
+  e.model.scale.setScalar(0.7);
   e.model.rotation.y = Math.PI; // nose toward the player while it faces the ship
   e.pos.copy(from);
   e.faceVel = false;
@@ -337,6 +367,137 @@ export function spawnCarrier(game, from, station, opts = {}) {
     }
     const exit = e.pos.clone().add(new THREE.Vector3(0, 0.5, -2));
     e.moveTo(exit, 3, (x) => x * x, () => e.remove());
+  })());
+  return e;
+}
+
+// ------------------------------------------------------------------ pivot mine
+
+/**
+ * Warps in close to the player, arms with a blinking eye, then sweeps 2-4 lasers around its
+ * pivot. When the sweep ends it pops into a ring of bullets. Shoot it first to disarm it.
+ */
+export function spawnMine(game, pos, opts = {}) {
+  const beams = opts.beams ?? 3;
+  const model = buildMine(beams);
+  const e = new Enemy(game, model, { hp: opts.hp ?? 3, radius: 0.026, score: 300, kind: 'mine', explodeScale: 1.4, contact: true });
+  e.pos.copy(pos);
+  e.faceVel = false;
+  e.faceShip = true;
+  e.cancelRadius = 0.12;
+  model.scale.setScalar(0.001);
+  game.fx.flash(pos, 0.06, COLORS.red, 0.15);
+  game.fx.ring(pos, 0.14, COLORS.red, 0.35);
+  game.sfx.play('laserCharge', game.worldPos(pos), { vol: 0.6, rate: 1.4 });
+  const spin = (opts.spin ?? rand(1.1, 1.9)) * (Math.random() < 0.5 ? -1 : 1);
+  const warn = opts.warn ?? 1.0, fire = opts.fire ?? 4.0;
+  const length = opts.length ?? 0.5;
+  let t = 0;
+  e.tick = (dt) => {
+    t += dt;
+    model.scale.setScalar(Math.min(1, t / 0.3));
+    model.rotation.z += dt * spin * (t > warn ? 1 : 0.3);
+    const eyeHull = model.userData.glow;
+    if (eyeHull) eyeHull.visible = t > warn || Math.floor(t * 10) % 2 === 0; // blinking while arming
+  };
+  // beams lie in the plane facing the player's head, so every sweep cuts across the play space
+  const axis = new THREE.Vector3();
+  const base = new THREE.Vector3();
+  const tmp = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  for (let i = 0; i < beams; i++) {
+    const phase0 = (i / beams) * TAU + rand(0, TAU / beams);
+    let ang = phase0;
+    game.lasers.add((l, dt) => {
+      axis.copy(game.headLocal).sub(e.pos).normalize();
+      up.set(0, 1, 0);
+      if (Math.abs(axis.y) > 0.9) up.set(1, 0, 0);
+      base.crossVectors(axis, up).normalize();
+      tmp.crossVectors(axis, base);
+      ang += dt * spin * (l.state === 'warn' ? 0.3 : 1);
+      l.origin.copy(e.pos);
+      l.dir.copy(base).multiplyScalar(Math.cos(ang)).addScaledVector(tmp, Math.sin(ang)).normalize();
+      l.origin.addScaledVector(l.dir, 0.02);
+    }, { warn, fire, width: 0.013, length, owner: e, color: [1, 0.25, 0.15] });
+  }
+  e.run((function* () {
+    yield warn;
+    game.sfx.play('laserHum', game.worldPos(e.pos), { vol: 0.35 });
+    yield fire + 0.1;
+    // pop: ring of bullets in the beam plane, then gone
+    const aim = dirTo(e.pos, game.headLocal);
+    for (const d of cone(aim, 14, Math.PI / 2, rand(0, TAU))) game.bullets.spawn(e.pos.x, e.pos.y, e.pos.z, d.x * 0.34, d.y * 0.34, d.z * 0.34, 'small');
+    game.fx.explode(e.pos, 1.2, { chunkColor: PALETTE.enemyHull });
+    game.sfx.play('pop', game.worldPos(e.pos), { vol: 0.8 });
+    e.remove();
+  })());
+  return e;
+}
+
+// ------------------------------------------------------------------ hornet (kamikaze)
+
+/** Curls in, flares its eye as a warning, then dashes straight at your ship. */
+export function spawnHornet(game, from, approach, opts = {}) {
+  const e = new Enemy(game, buildDart(), { hp: opts.hp ?? 2, radius: 0.02, score: 250, kind: 'hornet', contact: true });
+  e.model.scale.setScalar(0.6);
+  e.pos.copy(from);
+  e.followPath([from, approach[0], approach[1]], (opts.travel ?? 2.2) * PACE);
+  e.setJink(0.02, 3.5);
+  e.run((function* () {
+    yield (opts.travel ?? 2.2) * PACE;
+    e.jink = null;
+    e.mover = null;
+    e.faceShip = false;
+    // telegraph
+    const target = game.ship.pos.clone();
+    game.lasers.add((l) => { l.origin.copy(e.pos); l.dir.copy(target).sub(e.pos).normalize(); }, { warn: 0.45, fire: 0.001, width: 0.004, length: e.pos.distanceTo(target) + 0.2, owner: e, color: [1, 0.55, 0.1] });
+    game.sfx.play('laserCharge', game.worldPos(e.pos), { vol: 0.5, rate: 1.8 });
+    yield 0.45;
+    const dir = target.sub(e.pos).normalize();
+    let speed = 0.6;
+    game.sfx.play('enemyShotBig', game.worldPos(e.pos), { vol: 0.7, rate: 1.4 });
+    for (let t = 0; t < 2.2; t += game.dt) {
+      const dt = game.dt;
+      speed = Math.min(1.5, speed + 2.5 * dt);
+      // slight homing during the first part of the dash
+      if (t < 0.35) dir.lerp(_v.copy(game.ship.pos).sub(e.pos).normalize(), 0.06).normalize();
+      e.pos.addScaledVector(dir, speed * dt);
+      if (dt > 0 && Math.random() < 0.6) game.fx.spawn({ x: e.pos.x, y: e.pos.y, z: e.pos.z, life: 0.25, size: 0.012, size1: 0.003, color: COLORS.orange, shape: SHAPE_GLOW, additive: 0.8 });
+      if (e.pos.z > game.headLocal.z + 0.4) break;
+      yield;
+    }
+    e.remove();
+  })());
+  return e;
+}
+
+// ------------------------------------------------------------------ wraith (erratic fighter)
+
+/** Hops between random points around you with no fixed path, firing fans between hops. */
+export function spawnWraith(game, from, opts = {}) {
+  const e = new Enemy(game, buildDart(), { hp: opts.hp ?? 6, radius: 0.026, score: 400, kind: 'wraith' });
+  e.model.scale.setScalar(0.8);
+  e.pos.copy(from);
+  e.setJink(0.015, 4);
+  const box = opts.box || { x: [-0.55, 0.55], y: [-0.1, 0.45], z: [-1.0, -0.45] };
+  e.run((function* () {
+    const hops = opts.hops ?? 6;
+    for (let i = 0; i < hops; i++) {
+      const to = new THREE.Vector3(rand(...box.x), rand(...box.y), rand(...box.z));
+      const dur = rand(0.35, 0.7);
+      e.faceVel = true;
+      e.moveTo(to, dur, (k) => 1 - Math.pow(1 - k, 3));
+      yield dur + rand(0.05, 0.25);
+      e.faceVel = false;
+      e.faceShip = true;
+      const d = dirTo(e.pos, game.ship.pos);
+      for (const f of fan(d, opts.fan ?? 5, 0.55, rand(0, Math.PI))) game.bullets.spawn(e.pos.x, e.pos.y, e.pos.z, f.x * 0.5, f.y * 0.5, f.z * 0.5, 'rice');
+      game.sfx.play('enemyShot', game.worldPos(e.pos), { vol: 0.6 });
+      yield 0.2;
+      e.faceShip = false;
+    }
+    e.faceVel = true;
+    e.moveTo(e.pos.clone().add(new THREE.Vector3(Math.sign(e.pos.x || 1) * 1.5, 0.5, -1.2)), 1.2, (x) => x * x, () => e.remove());
   })());
   return e;
 }
@@ -382,10 +543,10 @@ export class Swarm {
     if (this.mites.length >= this.capacity) return;
     const game = this.game;
     const m = {
-      alive: true, kind: 'mite', score: 50, radius: 0.022, hp: 1, explodeScale: 0.6, contact: true,
+      alive: true, kind: 'mite', score: 50, radius: 0.016, hp: 1, explodeScale: 0.6, contact: true,
       pos: new THREE.Vector3(), prev: new THREE.Vector3(), quat: new THREE.Quaternion(), t: 0,
       off: new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(spread),
-      wob: rand(0, TAU), wobF: rand(2, 4), path, duration, flash: 0, shooter, shot: false,
+      wob: rand(0, TAU), wobF: rand(2, 4), path, duration: duration * PACE, flash: 0, shooter, shot: false,
       aimPoint: (out) => out.copy(m.pos),
       testShot: (s) => (segmentSphere(s.px, s.py, s.pz, s.x, s.y, s.z, m.pos.x, m.pos.y, m.pos.z, m.radius + s.radius) >= 0 ? 'hit' : null),
       damage: (dmg, pt) => {
@@ -440,7 +601,7 @@ export class Swarm {
     const n = this.mites.length;
     for (let i = 0; i < n; i++) {
       const m = this.mites[i];
-      this._s.setScalar(1.35);
+      this._s.setScalar(1.0);
       _m.compose(m.pos, m.quat, this._s);
       this.hull.setMatrixAt(i, _m);
       this.glow.setMatrixAt(i, _m);
@@ -464,16 +625,19 @@ export class Swarm {
 // ------------------------------------------------------------------ pickups
 
 export const CAPSULES = {
-  P: { color: 0xff5a1f, name: 'POWER UP', css: '#ff8a4a' },
-  O: { color: 0xffb02e, name: 'OPTION', css: '#ffc85a' },
-  S: { color: 0x2fd6ff, name: 'SHIELD', css: '#6ae6ff' },
-  B: { color: 0xff3df0, name: 'BOMB +1', css: '#ff7af5' },
+  P: { color: 0xff5a1f, name: 'WEAPON UP', tag: 'WEAPON', css: '#ff8a4a' },
+  O: { color: 0xffb02e, name: 'OPTION DRONE', tag: 'DRONE', css: '#ffc85a' },
+  S: { color: 0x2fd6ff, name: 'SHIELD', tag: 'SHIELD', css: '#6ae6ff' },
+  B: { color: 0xff3df0, name: 'BOMB +1', tag: 'BOMB', css: '#ff7af5' },
 };
 
-function letterTexture(letter, css) {
-  const c = makeCanvas(128, 128);
+/** Capsule label: the word, so you know what you are flying into. */
+function letterTexture(type, css) {
+  const c = makeCanvas(256, 96);
   const ctx = c.getContext('2d');
-  drawText(ctx, letter, 64, 68, { size: 92, color: '#ffffff', glow: css, italic: false, weight: 900 });
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(8, 14, 240, 68);
+  drawText(ctx, CAPSULES[type].tag, 128, 50, { size: 52, fit: 228, color: '#ffffff', glow: css, italic: false, weight: 900, spacing: 0.08 });
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
@@ -491,8 +655,8 @@ export class Pickup {
     this.group.add(this.model);
     if (!letterTex[type]) letterTex[type] = letterTexture(type, def.css);
     this.label = new THREE.Sprite(new THREE.SpriteMaterial({ map: letterTex[type], depthWrite: false, transparent: true }));
-    this.label.scale.setScalar(0.03);
-    this.label.position.y = 0.032;
+    this.label.scale.set(0.064, 0.024, 1);
+    this.label.position.y = 0.036;
     this.group.add(this.label);
     this.group.position.copy(pos);
     this.pos = this.group.position;

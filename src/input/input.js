@@ -247,6 +247,9 @@ export class BotInput {
         want.set(clamp(target.pos.x, -0.35, 0.35), clamp(target.pos.y, -0.2, 0.28), 0.02);
       }
     }
+    // keep strafing like a person would: aimed fire never finds a stationary target
+    want.x += Math.sin(this.t * 1.7) * 0.07;
+    want.y += Math.cos(this.t * 1.1) * 0.05;
     for (const p of g.pickups) {
       if (p.pos.distanceTo(ship.pos) < 0.25) { want.copy(p.pos); break; }
     }
@@ -266,6 +269,20 @@ export class BotInput {
       const along = (dx * b.vx + dy * b.vy + dz * b.vz) / sp;
       rep.x += (dx - (b.vx / sp) * along) * w;
       rep.y += (dy - (b.vy / sp) * along) * w;
+    }
+    // lasers: step away from the closest point of any beam that is (or is about to be) live
+    for (const l of g.lasers.items) {
+      if (l.state === 'fade') continue;
+      const ax = l.origin.x, ay = l.origin.y, az = l.origin.z;
+      const dx = l.dir.x * l.length, dy = l.dir.y * l.length, dz = l.dir.z * l.length;
+      const px = ship.pos.x - ax, py = ship.pos.y - ay, pz = ship.pos.z - az;
+      const t = Math.max(0, Math.min(1, (px * dx + py * dy + pz * dz) / (dx * dx + dy * dy + dz * dz || 1)));
+      const cx = ship.pos.x - (ax + dx * t), cy = ship.pos.y - (ay + dy * t), cz = ship.pos.z - (az + dz * t);
+      const d = Math.hypot(cx, cy, cz);
+      if (d < 0.09) {
+        const w = (0.09 - d) / 0.09 * 0.25 / (d || 1);
+        rep.x += cx * w; rep.y += cy * w;
+      }
     }
     want.add(rep.clampLength(0, 0.25));
     want.x = clamp(want.x, -0.42, 0.42);
