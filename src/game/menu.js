@@ -270,3 +270,111 @@ export class Menu {
     return false;
   }
 }
+
+/**
+ * A row of big choice buttons (used for EASY / NORMAL / HARD under the title). Point and pull
+ * the trigger to choose; the current choice stays lit.
+ */
+export class ChoiceBar {
+  constructor(game, { width = 0.46, height = 0.075 } = {}) {
+    this.game = game;
+    this.width = width;
+    this.height = height;
+    this.choices = [];
+    this.current = '';
+    this.hover = -1;
+    this.visible = false;
+    this.panel = new TextPanel(width, height, PPM, { renderOrder: 45 });
+    this.panel.opacity = 0;
+    game.arena.add(this.panel.mesh);
+    this.raycaster = new THREE.Raycaster();
+    this._fwd = new THREE.Vector3();
+  }
+
+  /** choices: [{ key, label, sub }], onPick(key) */
+  show(choices, current, onPick, pos) {
+    this.choices = choices;
+    this.current = current;
+    this.onPick = onPick;
+    this.panel.mesh.position.set(...pos);
+    const head = new THREE.Vector3(0, 0.28, 0.42).applyMatrix4(this.game.arena.matrixWorld);
+    this.panel.mesh.lookAt(head);
+    this.visible = true;
+    this.hover = -1;
+    this._draw();
+  }
+
+  hide() {
+    this.visible = false;
+    this.panel.opacity = 0;
+  }
+
+  /** World position of choice i (used by automated tests). */
+  itemWorldPos(i, out = new THREE.Vector3()) {
+    const n = this.choices.length;
+    out.set((-0.5 + (i + 0.5) / n) * this.width, 0, 0);
+    return this.panel.mesh.localToWorld(out);
+  }
+
+  setCurrent(key) {
+    this.current = key;
+    if (this.visible) this._draw();
+  }
+
+  _draw() {
+    const p = this.panel;
+    const { ctx, w, h } = p;
+    p.clear();
+    const n = this.choices.length;
+    const gap = 14;
+    const bw = (w - gap * (n + 1)) / n;
+    this.choices.forEach((c, i) => {
+      const x = gap + i * (bw + gap);
+      const on = c.key === this.current;
+      const hov = i === this.hover;
+      ctx.fillStyle = on ? 'rgba(51,225,255,0.9)' : hov ? 'rgba(51,225,255,0.35)' : 'rgba(5,8,20,0.82)';
+      roundRect(ctx, x, 6, bw, h - 12, 22);
+      ctx.fill();
+      ctx.strokeStyle = on ? '#ffffff' : 'rgba(51,225,255,0.7)';
+      ctx.lineWidth = on ? 5 : 3;
+      ctx.stroke();
+      drawText(ctx, c.label, x + bw / 2, h * 0.4, { size: 64, fit: bw - 24, italic: false, weight: 900, spacing: 0.12, color: on ? '#04121a' : '#e8f6ff', glow: on ? null : '#33e1ff', outline: on ? null : 'rgba(0,0,0,0.85)' });
+      if (c.sub) drawText(ctx, c.sub, x + bw / 2, h * 0.76, { size: 30, fit: bw - 24, italic: false, weight: 700, spacing: 0.06, color: on ? '#0a2a36' : '#9fdcef', glow: null, outline: null });
+    });
+    p.commit();
+  }
+
+  /** pointers: [{ hand, origin, quaternion, select }]. Returns true when a choice was made. */
+  update(dt, pointers) {
+    if (!this.visible) return false;
+    this.panel.opacity = Math.min(1, (this.panel.material.opacity || 0) + dt * 6);
+    let hover = -1, picked = -1, picker = null;
+    for (const ptr of pointers) {
+      this._fwd.set(0, 0, -1).applyQuaternion(ptr.quaternion);
+      this.raycaster.set(ptr.origin, this._fwd);
+      const hit = this.raycaster.intersectObject(this.panel.mesh, false)[0];
+      if (!hit || !hit.uv) continue;
+      const i = Math.min(this.choices.length - 1, Math.floor(hit.uv.x * this.choices.length));
+      hover = i;
+      if (ptr.select) { picked = i; picker = ptr.hand; }
+    }
+    if (hover !== this.hover) {
+      this.hover = hover;
+      this._draw();
+      if (hover >= 0) {
+        this.game.sfx.play('ui', null, { vol: 0.35, minGap: 0.04 });
+        for (const p of pointers) this.game.input.haptic(p.hand, 0.15, 12);
+      }
+    }
+    if (picked >= 0) {
+      const c = this.choices[picked];
+      this.current = c.key;
+      this._draw();
+      this.game.sfx.play('grab', null, { vol: 0.8 });
+      this.game.input.haptic(picker, 0.5, 40);
+      this.onPick && this.onPick(c.key);
+      return true;
+    }
+    return false;
+  }
+}

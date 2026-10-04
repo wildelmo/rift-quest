@@ -15,8 +15,22 @@ try {
   await page.waitForTimeout(1500);
   assert.equal(await state(page), 'title');
   await page.screenshot({ path: `${out}/flow-1-title.png` });
+  // pick HARD, then NORMAL, from the big buttons under the title
+  for (const [i, key] of [[2, 'hard'], [1, 'normal']]) {
+    const d = await page.evaluate((k) => window.__rift.diffScreen(k), i);
+    await page.mouse.move(d.x, d.y);
+    await page.waitForTimeout(500);
+    await page.mouse.down();
+    await page.waitForTimeout(300);
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    assert.equal(await page.evaluate(() => window.__rift.game.diffBar.current), key, `difficulty ${key} selected`);
+    assert.equal(await page.evaluate(() => window.__rift.game.state), 'title', 'choosing difficulty does not start the game');
+  }
   // grab: click on the canvas near the resting ship
-  await page.mouse.move(400, 300);
+  const sp = await page.evaluate(() => window.__rift.shipScreen());
+  await page.mouse.move(sp.x, sp.y);
+  await page.waitForTimeout(400);
   await page.mouse.down();
   await page.mouse.up();
   await page.waitForFunction(() => window.__rift.game.state === 'playing', null, { timeout: 10000 });

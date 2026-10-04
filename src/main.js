@@ -68,7 +68,7 @@ const inputProxy = {
 };
 room.placeFromHead(nominalHead.position, nominalHead.quaternion);
 game = new Game({ scene, room, audio, input: inputProxy, options });
-desktopInput.menuOpen = () => game.menu.visible && game.menu.hover >= 0; // clicks go to the menu only when over a button
+desktopInput.menuOpen = () => (game.menu.visible && game.menu.hover >= 0) || (game.diffBar.visible && game.diffBar.hover >= 0); // clicks go to the menu only when over a button
 game.onExit = () => exitGame();
 
 // ------------------------------------------------------------------ audio lifecycle
@@ -334,6 +334,14 @@ window.__rift = {
   menuItemScreen(i) {
     const p = game.menu.itemWorldPos(i).project(camera);
     return { x: (p.x + 1) / 2 * window.innerWidth, y: (1 - p.y) / 2 * window.innerHeight, labels: game.menu.items.map((it) => it.label) };
+  },
+  shipScreen() {
+    const p = game.ship.pos.clone().applyMatrix4(room.arena.matrixWorld).project(camera);
+    return { x: (p.x + 1) / 2 * window.innerWidth, y: (1 - p.y) / 2 * window.innerHeight };
+  },
+  diffScreen(i) {
+    const p = game.diffBar.itemWorldPos(i).project(camera);
+    return { x: (p.x + 1) / 2 * window.innerWidth, y: (1 - p.y) / 2 * window.innerHeight };
   },
   get overlayVisible() { return !ui.overlay.classList.contains('hidden'); },
 };

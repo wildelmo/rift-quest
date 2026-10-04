@@ -309,6 +309,7 @@ export class Lasers {
     this._view = new THREE.Vector3();
     this._n = new THREE.Vector3();
     this._m = new THREE.Matrix4();
+    this._wp = new THREE.Vector3();
   }
 
   _mesh() {
@@ -339,6 +340,8 @@ export class Lasers {
       warn: opts.warn ?? 0.8, fire: opts.fire ?? 1.5, fade: 0.25, width: opts.width ?? 0.03, length: opts.length ?? 4,
       color: new THREE.Color(...(opts.color || [1, 0.15, 0.35])), t: 0, state: 'warn', mesh: this._mesh(), owner: opts.owner || null,
       onFire: opts.onFire || null, grazeTimer: 0, dead: false,
+      hum: opts.hum || null, // { sfx, name, vol }: a looping sound owned by this beam
+      humHandle: null,
     };
     l.mesh.material.uniforms.uColor.value.copy(l.color);
     driver(l, 0);
@@ -358,15 +361,18 @@ export class Lasers {
       if (l.state === 'warn' && l.t >= l.warn) {
         l.state = 'fire';
         l.t = 0;
+        if (l.hum && l.hum.sfx) l.humHandle = l.hum.sfx.loop(l.hum.name, this._world(l.origin), l.hum.vol ?? 0.5, l.fire + 0.6);
         l.onFire && l.onFire(l);
       } else if (l.state === 'fire' && l.t >= l.fire) {
         l.state = 'fade';
         l.t = 0;
       } else if (l.state === 'fade' && l.t >= l.fade) {
-        this.parent.remove(l.mesh);
-        this.meshPool.push(l.mesh);
-        l.dead = true;
+        this._release(l);
         continue;
+      }
+      if (l.humHandle) {
+        if (l.state === 'fire') l.humHandle.setPos(this._world(l.origin));
+        else { l.humHandle.stop(); l.humHandle = null; }
       }
       // collision while firing (the fade is harmless)
       if (l.state === 'fire' && ship.active) {
@@ -425,11 +431,20 @@ export class Lasers {
     }
   }
 
+  _world(p) {
+    return this._wp.copy(p).applyMatrix4(this.parent.matrixWorld);
+  }
+
+  /** Remove a beam and always silence its hum. */
+  _release(l) {
+    if (l.humHandle) { l.humHandle.stop(); l.humHandle = null; }
+    this.parent.remove(l.mesh);
+    this.meshPool.push(l.mesh);
+    l.dead = true;
+  }
+
   clear() {
-    for (const l of this.items) {
-      this.parent.remove(l.mesh);
-      this.meshPool.push(l.mesh);
-    }
+    for (const l of this.items) this._release(l);
     this.items.length = 0;
   }
 

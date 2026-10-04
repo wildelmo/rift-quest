@@ -1,7 +1,7 @@
 import { Sfx } from './sfx.js';
 import { Music } from './music.js';
 
-function makeImpulse(ctx, seconds = 2.4, decay = 3.2) {
+function makeImpulse(ctx, seconds = 1.3, decay = 3.0) {
   const len = Math.floor(ctx.sampleRate * seconds);
   const buf = ctx.createBuffer(2, len, ctx.sampleRate);
   for (let ch = 0; ch < 2; ch++) {
@@ -27,14 +27,16 @@ export class AudioEngine {
       return;
     }
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    this.ctx = new Ctx({ latencyHint: 'interactive' });
+    // 'balanced' gives the Quest's audio thread a larger buffer: no dropouts when the fight gets busy
+    this.ctx = new Ctx({ latencyHint: 'balanced' });
     const ctx = this.ctx;
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -14;
-    comp.knee.value = 10;
-    comp.ratio.value = 5;
-    comp.attack.value = 0.003;
-    comp.release.value = 0.2;
+    // brick-wall-ish limiter on the master so stacked explosions never clip into static
+    comp.threshold.value = -12;
+    comp.knee.value = 4;
+    comp.ratio.value = 14;
+    comp.attack.value = 0.002;
+    comp.release.value = 0.15;
     this.master = ctx.createGain();
     this.master.gain.value = 0.9;
     this.master.connect(comp).connect(ctx.destination);

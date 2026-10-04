@@ -296,7 +296,6 @@ export function spawnLancer(game, from, station, opts = {}) {
       const warn = 0.7, fire = 1.3;
       const target = new THREE.Vector3();
       game.sfx.play('laserCharge', game.worldPos(e.pos), { vol: 0.8 });
-      let hum = null;
       game.lasers.add((l, dt) => {
         tt += dt;
         const p = l.state === 'warn' ? 0 : clamp(l.t / fire, 0, 1);
@@ -307,13 +306,12 @@ export function spawnLancer(game, from, station, opts = {}) {
         _v.copy(e.pos).add(l.dir);
         _m.lookAt(e.pos, _v, _up);
         e.group.quaternion.setFromRotationMatrix(_m);
-        if (hum) hum.setPos(game.worldPos(l.origin));
       }, {
         warn, fire, width: 0.032, length: 3.2, owner: e, color: [1, 0.2, 0.32],
-        onFire: () => { hum = game.sfx.loop('laserHum', game.worldPos(e.pos), 0.5); game.haptic(0.3, 60); },
+        hum: { sfx: game.sfx, name: 'laserHum', vol: 0.45 },
+        onFire: () => game.haptic(0.3, 60),
       });
       yield warn + fire;
-      hum && hum.stop();
       yield 0.5;
       // a short aimed fan between sweeps
       const d = dirTo(e.muzzle(_v2), game.ship.pos);
@@ -420,11 +418,10 @@ export function spawnMine(game, pos, opts = {}) {
       l.origin.copy(e.pos);
       l.dir.copy(base).multiplyScalar(Math.cos(ang)).addScaledVector(tmp, Math.sin(ang)).normalize();
       l.origin.addScaledVector(l.dir, 0.02);
-    }, { warn, fire, width: 0.013, length, owner: e, color: [1, 0.25, 0.15] });
+    }, { warn, fire, width: 0.013, length, owner: e, color: [1, 0.25, 0.15], hum: i === 0 ? { sfx: game.sfx, name: 'laserHum', vol: 0.3 } : null });
   }
   e.run((function* () {
     yield warn;
-    game.sfx.play('laserHum', game.worldPos(e.pos), { vol: 0.35 });
     yield fire + 0.1;
     // pop: ring of bullets in the beam plane, then gone
     const aim = dirTo(e.pos, game.headLocal);

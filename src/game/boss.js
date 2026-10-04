@@ -44,9 +44,12 @@ class Part {
     this.hull = object.userData.hull || null;
   }
 
-  sync() {
+  sync(dt) {
+    if (!this.vel) { this.vel = new THREE.Vector3(); this.prevPos = new THREE.Vector3().copy(this.pos); }
+    this.prevPos.copy(this.pos);
     this.object.getWorldPosition(this.pos);
     this.boss.game.arena.worldToLocal(this.pos);
+    if (dt > 0) this.vel.subVectors(this.pos, this.prevPos).divideScalar(dt);
   }
 
   aimPoint(out) {
@@ -163,7 +166,7 @@ export class Gyre {
       const pod = gyrePod();
       mount.add(pod);
       this.outer.add(mount);
-      const part = new Part(this, mount, { hp: BOSS_HP.pod, radius: 0.058, name: 'pod', score: 8000, kind: 'pod' });
+      const part = new Part(this, mount, { hp: BOSS_HP.pod, radius: 0.068, name: 'pod', score: 8000, kind: 'pod' });
       part.model = pod;
       part.fireOffset = i * 0.65;
       this.pods.push(part);
@@ -385,7 +388,6 @@ export class Gyre {
 
   _emitterBeam(em, targetFn, { warn = 0.9, fire = 2.0, width = 0.034 } = {}) {
     const g = this.game;
-    let hum = null;
     const target = new THREE.Vector3();
     g.sfx.play('laserCharge', g.worldPos(em.pos), { vol: 0.9 });
     return g.lasers.add((l, dt) => {
@@ -394,11 +396,10 @@ export class Gyre {
       l.origin.copy(em.pos);
       l.dir.copy(target).sub(l.origin).normalize();
       l.origin.addScaledVector(l.dir, 0.05);
-      if (hum) hum.setPos(g.worldPos(l.origin));
-      if (l.state === 'fade' && hum) { hum.stop(); hum = null; }
     }, {
       warn, fire, width, length: 3.4, owner: em, color: [1, 0.12, 0.3],
-      onFire: () => { hum = g.sfx.loop('laserHum', g.worldPos(em.pos), 0.6); g.haptic(0.35, 60, 'both'); },
+      hum: { sfx: g.sfx, name: 'laserHum', vol: 0.5 },
+      onFire: () => g.haptic(0.35, 60, 'both'),
     });
   }
 
@@ -650,7 +651,7 @@ export class Gyre {
     // ring motion
     const rageK = this.rage ? 2.2 : 1;
     this.inner.rotation.z += dt * this.spin.inner * rageK;
-    this.outer.rotation.z += dt * this.spin.outer * (this.pods.filter((p) => p.alive).length <= 2 ? 1.6 : 1);
+    this.outer.rotation.z += dt * this.spin.outer * (this.pods.filter((p) => p.alive).length <= 2 ? 1.3 : 1);
     this.spin.midSwing += dt * this.spin.midSpeed;
     this.mid.rotation.y = Math.sin(this.spin.midSwing) * 0.95 + (this.phase === 'intro' ? (1 - this.unfold) * 3 : 0);
     this.mid.rotation.z = Math.sin(this.spin.midSwing * 0.5) * 0.25;
@@ -714,7 +715,7 @@ export class Gyre {
 
     // sync weak point positions + hit flashes
     for (const p of this.parts) {
-      p.sync();
+      p.sync(dt);
       if (p.flash > 0) {
         p.flash -= dt;
         const on = p.flash > 0;
@@ -778,7 +779,13 @@ export class Gyre {
         return 'armor';
       }
     }
-    // the rings
+    // the rings - but never shield an exposed weak point: a shot that is about to reach a
+    // vulnerable pod or emitter goes through, so targets can't hide behind their own ring
+    for (const p of this.parts) {
+      if (!p.alive || !p.vulnerable || p.kind === 'core') continue;
+      const dx = s.x - p.pos.x, dy = s.y - p.pos.y, dz = s.z - p.pos.z;
+      if (dx * dx + dy * dy + dz * dz < 0.0144) return null;
+    }
     for (const a of this._armor || []) {
       _v.set(s.x, s.y, s.z).applyMatrix4(a.toLocal);
       if (torusDistance(_v.x, _v.y, _v.z, a.R, a.r + s.radius * 0.5) < 0) {

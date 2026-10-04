@@ -248,7 +248,7 @@ export class BotInput {
         want.copy(g.boss.eyeTarget).lerp(g.boss.root.position, 0.0);
         want.z = 0;
       } else {
-        want.set(clamp(target.pos.x, -0.35, 0.35), clamp(target.pos.y, -0.2, 0.28), 0.02);
+        want.set(clamp(target.pos.x, -0.4, 0.4), clamp(target.pos.y, -0.28, 0.32), 0.02);
       }
     }
     // keep strafing like a person would: aimed fire never finds a stationary target

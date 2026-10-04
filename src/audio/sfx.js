@@ -241,7 +241,16 @@ const RECIPES = {
   }],
 };
 
-const LIMITS = { shot: 3, hit: 4, tink: 3, graze: 3, coin: 4, enemyShot: 3, enemyShotBig: 3, pop: 6 };
+// Per-sound concurrency caps (default DEFAULT_LIMIT).
+const LIMITS = { shot: 3, hit: 3, tink: 2, graze: 2, coin: 3, enemyShot: 3, enemyShotBig: 2, pop: 4, boom: 3, laserHum: 3, laserCharge: 3, armorBreak: 2 };
+const DEFAULT_LIMIT = 3;
+// The Quest's audio thread is the bottleneck: cap total simultaneous voices, and only give the
+// expensive HRTF spatialiser to a few big sounds. Everything else uses cheap equal-power panning.
+const MAX_VOICES = 26;
+const MAX_HRTF = 5;
+const HRTF_NAMES = new Set(['boom', 'bigboom', 'armorBreak', 'rift', 'thrum', 'laserHum', 'death']);
+// Sounds that may exceed the voice cap (rare, important).
+const PRIORITY = new Set(['bigboom', 'death', 'bomb', 'warning', 'powerup', 'extend', 'shieldBreak', 'grab', 'ui']);
 
 export class Sfx {
   constructor() {
@@ -250,6 +259,9 @@ export class Sfx {
     this.ready = false;
     this.active = {};
     this.lastPlay = {};
+    this.voices = 0;
+    this.hrtfVoices = 0;
+    this.loops = new Set();
     this.volume = 1; // the player's EFFECTS volume (applied on the output node)
   }
 
@@ -316,9 +328,9 @@ export class Sfx {
     }
   }
 
-  _panner(pos) {
+  _panner(pos, hrtf) {
     const p = this.ctx.createPanner();
-    p.panningModel = 'HRTF';
+    p.panningModel = hrtf ? 'HRTF' : 'equalpower';
     p.distanceModel = 'inverse';
     p.refDistance = 0.6;
     p.maxDistance = 30;
@@ -338,8 +350,9 @@ export class Sfx {
     const now = this.ctx.currentTime;
     const minGap = opts.minGap ?? 0.025;
     if (this.lastPlay[name] && now - this.lastPlay[name] < minGap) return null;
-    const limit = LIMITS[name] ?? 8;
+    const limit = LIMITS[name] ?? DEFAULT_LIMIT;
     if ((this.active[name] || 0) >= limit) return null;
+    if (this.voices >= MAX_VOICES && !PRIORITY.has(name)) return null;
     this.lastPlay[name] = now;
     const src = this.ctx.createBufferSource();
     src.buffer = this.buffers[name];
@@ -349,8 +362,9 @@ export class Sfx {
     g.gain.value = opts.vol ?? 1;
     src.connect(g);
     let tail = g;
+    const hrtf = !!pos && HRTF_NAMES.has(name) && this.hrtfVoices < MAX_HRTF;
     if (pos) {
-      const p = this._panner(pos);
+      const p = this._panner(pos, hrtf);
       g.connect(p);
       tail = p;
     }
@@ -362,75 +376,57 @@ export class Sfx {
       tail.connect(s).connect(this.reverbSend);
     }
     this.active[name] = (this.active[name] || 0) + 1;
+    this.voices++;
+    if (hrtf) this.hrtfVoices++;
     src.onended = () => {
       this.active[name]--;
-      try { tail.disconnect(); } catch { /* already gone */ }
+      this.voices--;
+      if (hrtf) this.hrtfVoices--;
+      try { src.disconnect(); g.disconnect(); tail.disconnect(); } catch { /* already gone */ }
     };
     if (opts.loop) src.loop = true;
     src.start(now + (opts.delay ?? 0));
     return { src, gain: g, panner: pos ? tail : null };
   }
 
-  /** Start a looping sound and return a handle with setPos / setVol / stop. */
-  loop(name, pos, vol = 1) {
+  /**
+   * Start a looping sound and return a handle with setPos / setVol / stop.
+   * Loops are tracked and always end: they stop themselves after maxDuration seconds even if the
+   * owner forgets, and stopAllLoops() silences every one (used on resets, pause and exit).
+   */
+  loop(name, pos, vol = 1, maxDuration = 6) {
     const h = this.play(name, pos, { loop: true, vol: 0, rateJitter: 0, minGap: 0 });
     if (!h) return null;
     const ctx = this.ctx;
     h.gain.gain.setTargetAtTime(vol, ctx.currentTime, 0.05);
-    return {
+    // hard stop scheduled up front: a leaked handle can never buzz forever
+    h.src.stop(ctx.currentTime + maxDuration);
+    const loops = this.loops;
+    let stopped = false;
+    const handle = {
       setPos(p) {
-        if (!h.panner) return;
+        if (stopped || !h.panner) return;
         if (h.panner.positionX) {
           h.panner.positionX.value = p.x; h.panner.positionY.value = p.y; h.panner.positionZ.value = p.z;
         }
       },
-      setVol(v) { h.gain.gain.setTargetAtTime(v, ctx.currentTime, 0.05); },
-      setRate(r) { h.src.playbackRate.setTargetAtTime(r, ctx.currentTime, 0.05); },
+      setVol(v) { if (!stopped) h.gain.gain.setTargetAtTime(v, ctx.currentTime, 0.05); },
+      setRate(r) { if (!stopped) h.src.playbackRate.setTargetAtTime(r, ctx.currentTime, 0.05); },
       stop() {
-        h.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.06);
-        h.src.stop(ctx.currentTime + 0.3);
+        if (stopped) return;
+        stopped = true;
+        loops.delete(handle);
+        h.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.04);
+        try { h.src.stop(ctx.currentTime + 0.2); } catch { /* already stopped */ }
       },
     };
+    h.src.addEventListener('ended', () => { stopped = true; loops.delete(handle); });
+    loops.add(handle);
+    return handle;
   }
 
-  /** Live oscillator for the charge shot: returns {set(charge), stop()} */
-  chargeTone() {
-    if (!this.ready) return null;
-    const ctx = this.ctx;
-    const o1 = ctx.createOscillator();
-    const o2 = ctx.createOscillator();
-    o1.type = 'sawtooth';
-    o2.type = 'square';
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.Q.value = 6;
-    const g = ctx.createGain();
-    g.gain.value = 0;
-    o1.connect(lp);
-    o2.connect(lp);
-    lp.connect(g).connect(this.out);
-    const t = ctx.currentTime;
-    o1.start(t);
-    o2.start(t);
-    let full = false;
-    return {
-      set: (c) => {
-        const now = ctx.currentTime;
-        o1.frequency.setTargetAtTime(90 + c * 260, now, 0.03);
-        o2.frequency.setTargetAtTime(180 + c * 520 + (c >= 1 ? Math.sin(now * 60) * 30 : 0), now, 0.03);
-        lp.frequency.setTargetAtTime(300 + c * 3200, now, 0.03);
-        g.gain.setTargetAtTime(0.03 + c * 0.07, now, 0.05);
-        if (c >= 1 && !full) {
-          full = true;
-          this.play('coin', null, { vol: 1.4, rate: 0.75 });
-        }
-      },
-      stop: () => {
-        const now = ctx.currentTime;
-        g.gain.setTargetAtTime(0, now, 0.03);
-        o1.stop(now + 0.2);
-        o2.stop(now + 0.2);
-      },
-    };
+  /** Stop every looping sound (lasers, hums). */
+  stopAllLoops() {
+    for (const l of [...this.loops]) l.stop();
   }
 }

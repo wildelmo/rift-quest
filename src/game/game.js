@@ -11,8 +11,8 @@ import { Hud, fmt } from './hud.js';
 import { stage, WAVES } from './stage.js';
 import { PALETTE } from './models.js';
 import { Screens } from './screens.js';
-import { Menu } from './menu.js';
-import { difficulty, nextDifficulty } from './difficulty.js';
+import { Menu, ChoiceBar } from './menu.js';
+import { difficulty, nextDifficulty, setDifficulty } from './difficulty.js';
 import { loadAudioSettings, saveAudioSettings } from '../audio/settings.js';
 
 // The game: state machine, collision resolution, scoring and feedback (sound, haptics,
@@ -61,6 +61,7 @@ export class Game {
     this.hud = new Hud(this);
     this.screens = new Screens(room);
     this.menu = new Menu(this);
+    this.diffBar = new ChoiceBar(this, { width: 0.6, height: 0.1 });
     this.menuKey = '';
     this.audioSettings = loadAudioSettings(); // { music, effects, muted }
     this.applyAudioSettings();
@@ -148,6 +149,7 @@ export class Game {
     this.pickups.length = 0;
     this.bullets.clear();
     this.lasers.clear();
+    this.sfx.stopAllLoops();
     this.shots.clear();
     this.fx.clear();
     if (this.boss) { this.boss.dispose(); this.boss = null; }
@@ -589,6 +591,11 @@ export class Game {
     for (const t of this.targets) {
       if (!t.alive) continue;
       const p = t.aimPoint ? t.aimPoint(_v) : _v.copy(t.pos);
+      // lead moving targets: aim where they will be when the bolt arrives
+      if (t.vel) {
+        const lead = Math.hypot(p.x - origin.x, p.y - origin.y, p.z - origin.z) / SHIP.boltSpeed;
+        p.addScaledVector(t.vel, lead);
+      }
       const dx = p.x - origin.x, dy = p.y - origin.y, dz = p.z - origin.z;
       const l = Math.hypot(dx, dy, dz);
       if (l < 0.05 || l > 3.2) continue;
@@ -798,13 +805,14 @@ export class Game {
     const ship = this.ship;
 
     // --- the pointable menu (pause / title / end screens) takes the trigger while it is open
-    if (this.menu.visible) {
+    if (this.menu.visible || this.diffBar.visible) {
       const pointers = [];
       for (const [name, h] of Object.entries(hands)) {
         if (h && h.ray && h.ray.position && h.tracked !== false) pointers.push({ hand: name, origin: h.ray.position, quaternion: h.ray.quaternion, select: h.edges.trigger, hold: h.trigger > 0.5 });
       }
       if (frame.pointer) pointers.push(frame.pointer);
-      if (this.menu.update(realDt, pointers)) return;
+      if (this.diffBar.update(realDt, pointers)) return;
+      if (this.menu.visible && this.menu.update(realDt, pointers)) return;
     }
 
     // --- buttons that work anywhere
@@ -892,6 +900,7 @@ export class Game {
 
   _pause() {
     this.state = 'paused';
+    this.sfx.stopAllLoops();
     this.sfx.play('release', null, { vol: 0.6 });
   }
 
@@ -955,7 +964,7 @@ export class Game {
         ...sound, exit,
       ], 'center'];
     }
-    if (this.state === 'title') return ['OPTIONS', [diff, ...sound, exit], 'side'];
+    if (this.state === 'title') return ['OPTIONS', [...sound, exit], 'side'];
     if (this.state === 'gameover' && this.restReady) {
       const from = this.continueFrom >= WAVES.length ? 'THE GYRE' : `WAVE ${this.continueFrom + 1}`;
       return ['GAME OVER', [
@@ -972,6 +981,14 @@ export class Game {
   }
 
   _syncMenu() {
+    // big EASY / NORMAL / HARD buttons right under the title
+    if (this.state === 'title' && !this.diffBar.visible) {
+      this.diffBar.show([
+        { key: 'easy', label: 'EASY', sub: 'relaxed' },
+        { key: 'normal', label: 'NORMAL', sub: 'recommended' },
+        { key: 'hard', label: 'HARD', sub: 'bullet hell' },
+      ], difficulty().key, (key) => { setDifficulty(key); this.ship.reset(); this.menuKey = ''; }, [0, -0.115, -0.5]);
+    } else if (this.state !== 'title' && this.diffBar.visible) this.diffBar.hide();
     const spec = this._menuSpec();
     const key = spec ? `${spec[0]}|${spec[1].map((i) => i.label).join(',')}` : '';
     if (key === this.menuKey) return;
