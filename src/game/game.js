@@ -947,6 +947,7 @@ export class Game {
     const s = this.audioSettings;
     this.music.setVolume(s.muted ? 0 : s.music);
     this.sfx.setVolume(s.muted ? 0 : s.effects);
+    this.audio.setSilent && this.audio.setSilent(s.muted || (s.music <= 0 && s.effects <= 0));
   }
 
   _menuSpec() {

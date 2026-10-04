@@ -1,31 +1,33 @@
 import { Sfx } from './sfx.js';
 import { Music } from './music.js';
 
-/**
- * A cheap room reverb: six damped feedback-delay combs split across left and right. A
- * convolution reverb sounds a little richer but costs the Quest's audio thread far more.
- */
-function makeReverb(ctx, rt60 = 1.2) {
+// A small, cheap room reverb built only from feed-forward echo taps (a convolver costs the
+// Quest's audio thread far more): there is no feedback loop anywhere,
+// so it can never ring on by itself, whatever the browser's filter or delay maths does.
+// (The earlier comb-filter reverb fed back into itself; on the Quest it could run away into a
+// screech that kept going after the music stopped.)
+const TAPS = [0.019, 0.027, 0.034, 0.043, 0.052, 0.064, 0.077, 0.091, 0.108, 0.127, 0.149, 0.174, 0.203, 0.236, 0.274, 0.318];
+export function makeReverb(ctx, rt60 = 1.0) {
   const input = ctx.createGain();
   const pre = ctx.createBiquadFilter();
   pre.type = 'lowpass';
-  pre.frequency.value = 5000;
+  pre.frequency.value = 4200;
   input.connect(pre);
   const merger = ctx.createChannelMerger(2);
-  [0.0297, 0.0371, 0.0411, 0.0437, 0.0513, 0.0571].forEach((dt, i) => {
-    const d = ctx.createDelay(0.1);
+  let energy = 0;
+  TAPS.forEach((dt, i) => {
+    const d = ctx.createDelay(0.5);
     d.delayTime.value = dt;
-    const damp = ctx.createBiquadFilter();
-    damp.type = 'lowpass';
-    damp.frequency.value = 3200;
-    const fb = ctx.createGain();
-    fb.gain.value = Math.pow(10, (-3 * dt) / rt60);
-    pre.connect(d);
-    d.connect(damp).connect(fb).connect(d);
-    damp.connect(merger, 0, i % 2);
+    const g = ctx.createGain();
+    // decays 60 dB over rt60; alternate taps flip sign and side for a wider, less metallic tail
+    const a = Math.pow(10, (-3 * dt) / rt60) * (i % 3 === 2 ? -1 : 1);
+    g.gain.value = a;
+    energy += a * a;
+    pre.connect(d).connect(g).connect(merger, 0, i % 2);
   });
   const out = ctx.createGain();
-  out.gain.value = 0.06; // matched by ear-level energy to the old convolution reverb
+  // per side about the same tail energy as the old reverb (whose level was matched by ear)
+  out.gain.value = Math.min(0.2, Math.sqrt(0.028 / (energy / 2)));
   merger.connect(out);
   return { input, out };
 }
@@ -63,10 +65,28 @@ export class AudioEngine {
     this.master.connect(comp).connect(ctx.destination);
     const reverb = makeReverb(ctx);
     reverb.out.connect(this.master);
+    this.reverb = reverb;
+    this._applyGate();
     this.sfx.attach(ctx, this.master, reverb.input);
     this.music.attach(ctx, this.master, reverb.input);
     if (ctx.state !== 'running') await ctx.resume();
     await this.preparing;
+  }
+
+  /**
+   * Sound off (or both sliders at zero) closes the master itself, after every bus and the
+   * reverb, so nothing at all can reach the speakers. Safe to call before start().
+   */
+  setSilent(silent) {
+    this.silent = !!silent;
+    this._applyGate();
+  }
+
+  _applyGate() {
+    if (!this.master) return;
+    const t = this.ctx.currentTime;
+    this.master.gain.cancelScheduledValues(t);
+    this.master.gain.setTargetAtTime(this.silent ? 0 : 0.9, t, 0.03);
   }
 
   tick() {

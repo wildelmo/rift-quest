@@ -42,3 +42,32 @@ test('slider bar maps hit position to a clamped 0..1 value', () => {
   assert.ok(onSliderBar((x0 + x1) / 2));
   assert.ok(!onSliderBar(0.1), 'the label is not part of the bar');
 });
+
+test('the shared reverb has no feedback loop, so it can never ring on by itself', async () => {
+  // A comb reverb once fed back through a resonant filter, grew ~10x a second and screeched on
+  // after the music was muted. Record the reverb's graph with a fake context and look for cycles.
+  const { makeReverb } = await import('../src/audio/audio.js');
+  const nodes = [];
+  const node = (type) => {
+    const n = { type, out: [], gain: { value: 1 }, delayTime: { value: 0 }, frequency: { value: 0 }, Q: { value: 1 } };
+    n.connect = (to) => { n.out.push(to); return to; };
+    nodes.push(n);
+    return n;
+  };
+  const ctx = {
+    createGain: () => node('gain'), createDelay: () => node('delay'), createBiquadFilter: () => node('filter'),
+    createChannelMerger: () => node('merger'), createConvolver: () => node('convolver'),
+  };
+  const rv = makeReverb(ctx);
+  const state = new Map();
+  const cyclic = (n) => {
+    if (state.get(n) === 1) return true;
+    if (state.get(n) === 2) return false;
+    state.set(n, 1);
+    const hit = n.out.some(cyclic);
+    state.set(n, 2);
+    return hit;
+  };
+  assert.equal(cyclic(rv.input), false);
+  assert.ok(nodes.filter((n) => n.type === 'gain').every((n) => Math.abs(n.gain.value) <= 1));
+});
