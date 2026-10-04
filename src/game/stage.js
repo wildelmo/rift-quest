@@ -75,6 +75,18 @@ function* wave1(g) {
   for (const s of [-1, 1]) {
     spawnFormation(g, 5, () => [s < 0 ? L : R, around(70 * s, 30, 0.85), around(40 * s, 10, 0.7), around(65 * s, -5, 0.65), around(30 * s, -10, 0.72), around(10 * s, 20, 1.3), F], 6.0, { spacing: 0.24, shots: 2, firstShot: 1.2 });
   }
+  yield 5.0;
+  // F: two squadrons cross in front of you at once, one high, one low
+  spawnFormation(g, 6, () => [L, ...arc(-95, 95, 28, 0.8, 7), R], 6.5, { spacing: 0.2, shots: 2, firstShot: 1.2 });
+  spawnFormation(g, 6, () => [R, ...arc(95, -95, -10, 0.7, 7), L], 6.5, { spacing: 0.2, shots: 2, firstShot: 1.6 });
+  yield 5.0;
+  // G: a tighter, faster dive from the ceiling
+  for (let i = 0; i < 10; i++) {
+    const s = i % 2 ? 1 : -1;
+    const az = (i - 4.5) * 11;
+    spawnDart(g, [C, around(az, 50, 0.72), around(az * 0.7, 18, 0.58), around(az + 40 * s, 4, 0.64), around(100 * s, 12, 1.4)], 3.4, { shots: 2, firstShot: 0.8, interval: 0.7, speed: 0.45 });
+    yield 0.24;
+  }
   yield* clearOrTimeout(g, 14);
 }
 
@@ -99,6 +111,14 @@ function* wave2(g) {
   spawnBloom(g, R, around(75, -8, 0.8), { arms: 2, phaseStep: -0.45, interval: 0.09, duration: 8 });
   yield 4;
   spawnFormation(g, 8, () => [L, ...arc(-95, 95, 26, 0.78, 8), R], 7, { spacing: 0.22, shots: 2 });
+  yield 7;
+  // finale: a spiral overhead and another low in front, with squadrons sweeping between them
+  spawnBloom(g, C, around(-20, 40, 0.88), { arms: 3, phaseStep: 0.36, interval: 0.12, duration: 9, huge: true });
+  spawnBloom(g, F, around(20, -6, 0.86), { arms: 3, phaseStep: -0.36, interval: 0.12, duration: 9 });
+  yield 3;
+  spawnFormation(g, 6, () => [L, ...arc(-95, 95, 10, 0.72, 7), R], 6, { spacing: 0.2, shots: 2 });
+  yield 3;
+  spawnFormation(g, 6, () => [R, ...arc(95, -95, 30, 0.8, 7), L], 6, { spacing: 0.2, shots: 2 });
   yield* clearOrTimeout(g, 16);
 }
 
@@ -139,6 +159,14 @@ function* wave3(g) {
   g.swarm.stream(riverPath(g, Rm, Lm, -1).map((p, i) => (i > 0 && i < 7 ? p.clone().add(V(0, -0.1, -0.05)) : p)), 26, 6, { interval: 0.07, spread: 0.08, aimedShots: 4 });
   yield 2;
   spawnFormation(g, 6, () => [mouth(g, 'frontL'), ...arc(-70, 70, 30, 0.8, 6), mouth(g, 'frontR')], 5.5, { spacing: 0.2, shots: 2 });
+  yield 6;
+  // encore: lancers sweep from above and the right while a mirrored helix pours past
+  spawnLancer(g, C, around(-30, 40, 0.82), { sweeps: 2 });
+  spawnLancer(g, mouth(g, 'frontR'), around(40, 0, 0.85), { sweeps: 2, vertical: true });
+  yield 2.5;
+  g.swarm.stream([C, ...helix.slice(1).map((p) => V(-p.x, p.y, p.z))], 36, 7, { interval: 0.055, spread: 0.05, aimedShots: 6 });
+  g.sfx.play('rift', g.worldPos(C), { vol: 0.8 });
+  yield 5;
   yield* clearOrTimeout(g, 14);
 }
 
@@ -159,7 +187,18 @@ function* wave4(g) {
     yield 2.2;
   }
   yield () => !carrier.alive;
-  yield* clearOrTimeout(g, 10);
+  // the carrier's wing holds the line: lancers on both flanks, a ring-burster dead ahead
+  spawnLancer(g, L, around(-55, 18, 0.85), { sweeps: 2 });
+  spawnLancer(g, R, around(55, -2, 0.85), { sweeps: 2, vertical: true });
+  yield 2;
+  spawnBloom(g, F, around(0, 4, 0.9), { style: 'rings', duration: 8, hp: 36 });
+  yield 3;
+  for (let i = 0; i < 2; i++) {
+    const s = i % 2 ? 1 : -1;
+    spawnFormation(g, 6, () => [s > 0 ? R : L, ...arc(95 * s, -95 * s, 24 - i * 30, 0.74, 7), s > 0 ? L : R], 6, { spacing: 0.18, shots: 2 });
+    yield 2.5;
+  }
+  yield* clearOrTimeout(g, 12);
 }
 
 /** A spot near the ship (but never on it) where a pivot mine warps in. */

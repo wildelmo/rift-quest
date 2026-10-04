@@ -11,9 +11,9 @@
 //   mineReach    length of a boss-fight pivot mine's beams (metres)
 
 export const DIFFICULTIES = {
-  easy: { key: 'easy', label: 'EASY', enemyHp: 0.5, bulletSpeed: 1.0, density: 0.6, pace: 0.85, pressure: 0.5, mineBeams: -1, lives: 5, bombs: 4, bossHp: 0.6, escorts: 1, mineReach: 0.6 },
-  normal: { key: 'normal', label: 'NORMAL', enemyHp: 0.68, bulletSpeed: 1.2, density: 0.8, pace: 0.76, pressure: 0.72, mineBeams: 0, lives: 3, bombs: 3, bossHp: 0.9, escorts: 2, mineReach: 0.8 },
-  hard: { key: 'hard', label: 'HARD', enemyHp: 1.0, bulletSpeed: 1.45, density: 1.0, pace: 0.68, pressure: 1.0, mineBeams: 0, lives: 3, bombs: 3, bossHp: 1.25, escorts: 3, mineReach: 0.95 },
+  easy: { key: 'easy', label: 'EASY', enemyHp: 0.5, bulletSpeed: 1.0, density: 0.6, pace: 0.85, pressure: 0.5, mineBeams: -1, lives: 5, bombs: 2, bossHp: 0.6, escorts: 1, mineReach: 0.6 },
+  normal: { key: 'normal', label: 'NORMAL', enemyHp: 0.68, bulletSpeed: 1.2, density: 0.8, pace: 0.76, pressure: 0.72, mineBeams: 0, lives: 3, bombs: 1, bossHp: 0.9, escorts: 2, mineReach: 0.8 },
+  hard: { key: 'hard', label: 'HARD', enemyHp: 1.0, bulletSpeed: 1.45, density: 1.0, pace: 0.68, pressure: 1.0, mineBeams: 0, lives: 3, bombs: 1, bossHp: 1.25, escorts: 3, mineReach: 0.95 },
 };
 
 export const ORDER = ['easy', 'normal', 'hard'];

@@ -8,7 +8,7 @@ import { COLORS } from './fx.js';
 // The player's ship. Its pose is the controller pose, one-to-one, every frame - no smoothing.
 
 export const SHIP = {
-  hitRadius: 0.0055,
+  hitRadius: 0.0095, // the fuselage core: a bullet visibly crossing the hull is a hit
   grazeRadius: 0.03,
   fireRate: 12,
   boltSpeed: 3.4,

@@ -337,7 +337,6 @@ export function spawnCarrier(game, from, station, opts = {}) {
   e.faceShip = true;
   e.dropCapsule = true;
   e.cancelRadius = 0.6;
-  e.drops = 2;
   e.moveTo(station, opts.travel ?? 3.2);
   e.run((function* () {
     yield (opts.travel ?? 3.2);
@@ -381,7 +380,7 @@ export function spawnCarrier(game, from, station, opts = {}) {
 export function spawnMine(game, pos, opts = {}) {
   const beams = Math.max(2, (opts.beams ?? 3) + difficulty().mineBeams);
   const model = buildMine(beams);
-  const e = new Enemy(game, model, { hp: opts.hp ?? 3, radius: 0.026, score: 300, kind: 'mine', explodeScale: 1.4, contact: true });
+  const e = new Enemy(game, model, { hp: opts.hp ?? 30, radius: 0.026, score: 300, kind: 'mine', explodeScale: 1.4, contact: true });
   e.pos.copy(pos);
   e.faceVel = false;
   e.faceShip = true;
@@ -794,19 +793,23 @@ export class Pickup {
 }
 
 /** Choose the capsule type the player most needs. */
+export const MAX_BOMBS = 3;
+
 export function chooseCapsule(ship, rng = Math.random) {
   const weights = [
-    ['P', ship.level < 4 ? (ship.level === 1 ? 5 : 3) : 0],
+    // once you are maxed out, power capsules pay a score bonus rather than turning into
+    // shields and bombs: those stay rare whatever your loadout
+    ['P', ship.level < 4 ? (ship.level === 1 ? 5 : 3) : 2.5],
     ['O', ship.optionCount < 3 ? (ship.optionCount === 0 ? 4 : 2.2) : 0],
-    ['S', ship.shield ? 0 : 1.6],
-    ['B', ship.bombs < 5 ? 1.2 : 0.2],
+    ['S', ship.shield ? 0 : 0.6],
+    ['B', ship.bombs >= MAX_BOMBS ? 0 : ship.bombs >= 1 ? 0.15 : 0.4],
   ];
   const total = weights.reduce((a, [, w]) => a + w, 0);
   let r = rng() * total;
   for (const [k, w] of weights) {
     if (w > 0 && (r -= w) <= 0) return k;
   }
-  return 'B';
+  return 'P';
 }
 
 export { PALETTE, COLORS };

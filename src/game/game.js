@@ -5,7 +5,7 @@ import { SHAPE } from '../engine/billboards.js';
 import { Fx, COLORS } from './fx.js';
 import { EnemyBullets, Lasers } from './bullets.js';
 import { Ship, PlayerShots, SHIP } from './player.js';
-import { Swarm, Pickup, chooseCapsule, CAPSULES } from './enemies.js';
+import { Swarm, Pickup, chooseCapsule, CAPSULES, MAX_BOMBS } from './enemies.js';
 import { Gyre } from './boss.js';
 import { Hud, fmt } from './hud.js';
 import { stage, WAVES } from './stage.js';
@@ -442,7 +442,9 @@ export class Game {
     if (e.formation) {
       e.formation.killed++;
       if (e.formation.killed === e.formation.total) {
-        this.spawnPickup(chooseCapsule(this.ship), e.pos.clone());
+        // every other wiped-out formation leaves a capsule
+        this.formationsCleared = (this.formationsCleared || 0) + 1;
+        if (this.formationsCleared % 2 === 0) this.spawnPickup(chooseCapsule(this.ship), e.pos.clone());
         this.hud.popup('FORMATION BONUS', e.pos.clone().add(_v.set(0, 0.04, 0)), '#ffe066', '#ff9a1a', 1.2);
         this.addScore(2000, null);
       }
@@ -471,7 +473,8 @@ export class Game {
       ship.shield = true;
       what = 'blocks one hit';
     } else if (p.type === 'B') {
-      ship.bombs = Math.min(9, ship.bombs + 1);
+      ok = ship.bombs < MAX_BOMBS;
+      ship.bombs = Math.min(MAX_BOMBS, ship.bombs + 1);
       what = 'press A / X to clear the screen';
     }
     if (!ok) { title = 'BONUS +5,000'; what = ''; this.score += 5000; }
@@ -533,7 +536,7 @@ export class Game {
     if (this.state !== 'playing' || ship.dead || ship.bombs <= 0 || this.bomb) return;
     ship.bombs--;
     this.stats.bombsUsed++;
-    ship.invuln = Math.max(ship.invuln, 2.6);
+    ship.invuln = Math.max(ship.invuln, 1.4);
     this.bomb = { t: 0, origin: ship.pos.clone(), hit: new Set() };
     this.sfx.play('bomb', null, { vol: 1.1 });
     this.haptic(1, 220, 'both');
@@ -574,7 +577,8 @@ export class Game {
       if (!t.alive || b.hit.has(t)) continue;
       if (t.pos.distanceTo(b.origin) < r) {
         b.hit.add(t);
-        t.damage(t.kind === 'pod' || t.kind === 'emitter' || t.kind === 'core' ? 45 : 30, t.pos);
+        // a bomb is an escape, not a weapon: it clears bullets but only dents what it touches
+        t.damage(t.kind === 'pod' || t.kind === 'emitter' || t.kind === 'core' ? 12 : 10, t.pos);
       }
     }
     if (Math.random() < 0.8) this.fx.ring(b.origin, r * 1.05, COLORS.magenta, 0.15, 0.4 * (1 - k));

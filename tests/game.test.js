@@ -7,9 +7,15 @@ import { SHIP } from '../src/game/player.js';
 import { RIFT_SLOTS } from '../src/game/room.js';
 
 test('capsules never offer upgrades the ship cannot take', () => {
-  const maxed = { level: 4, optionCount: 3, shield: true, bombs: 9 };
-  for (let i = 0; i < 200; i++) assert.equal(chooseCapsule(maxed, () => i / 200), 'B');
-  const fresh = { level: 1, optionCount: 0, shield: false, bombs: 3 };
+  // a maxed ship with a full bomb bay and a shield only gets score bonuses
+  const maxed = { level: 4, optionCount: 3, shield: true, bombs: 3 };
+  for (let i = 0; i < 200; i++) assert.equal(chooseCapsule(maxed, () => i / 200), 'P');
+  // shields and bombs stay rare even when they are all a maxed ship could take
+  const bare = { level: 4, optionCount: 3, shield: false, bombs: 0 };
+  const rare = { P: 0, S: 0, B: 0 };
+  for (let i = 0; i < 1000; i++) rare[chooseCapsule(bare, () => (i + 0.5) / 1000)]++;
+  assert.ok(rare.S + rare.B < 0.35 * 1000, JSON.stringify(rare));
+  const fresh = { level: 1, optionCount: 0, shield: false, bombs: 1 };
   const counts = {};
   for (let i = 0; i < 1000; i++) {
     const k = chooseCapsule(fresh, () => (i + 0.5) / 1000);

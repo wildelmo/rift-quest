@@ -406,7 +406,7 @@ export class Gyre {
       if (p.distanceTo(s) > 0.15) break;
     }
     const d = difficulty();
-    spawnMine(g, p, { beams, length: d.mineReach, depth: 0.045, axis, hp: 10, scale: 1.3 });
+    spawnMine(g, p, { beams, length: d.mineReach, depth: 0.045, axis, hp: 90, scale: 1.3 });
   }
 
   /** Escorts fly in from the rift and stay for the fight; losses are replaced after a pause. */
@@ -429,7 +429,7 @@ export class Gyre {
     const n = this.escortCount++;
     const e = spawnEscort(g, from, {
       style: n % 3 === 1 ? 'warden' : 'picket',
-      drop: n % 4 === 3,
+      drop: n % 6 === 5,
       station: () => this._takeSlot(),
       release: (p) => this.escortSlots.delete(p),
       active: () => this.phase === 'crown' || this.phase === 'lattice' || this.phase === 'heart',
