@@ -1,14 +1,33 @@
 import { Sfx } from './sfx.js';
 import { Music } from './music.js';
 
-function makeImpulse(ctx, seconds = 1.3, decay = 3.0) {
-  const len = Math.floor(ctx.sampleRate * seconds);
-  const buf = ctx.createBuffer(2, len, ctx.sampleRate);
-  for (let ch = 0; ch < 2; ch++) {
-    const d = buf.getChannelData(ch);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
-  }
-  return buf;
+/**
+ * A cheap room reverb: six damped feedback-delay combs split across left and right. A
+ * convolution reverb sounds a little richer but costs the Quest's audio thread far more.
+ */
+function makeReverb(ctx, rt60 = 1.2) {
+  const input = ctx.createGain();
+  const pre = ctx.createBiquadFilter();
+  pre.type = 'lowpass';
+  pre.frequency.value = 5000;
+  input.connect(pre);
+  const merger = ctx.createChannelMerger(2);
+  [0.0297, 0.0371, 0.0411, 0.0437, 0.0513, 0.0571].forEach((dt, i) => {
+    const d = ctx.createDelay(0.1);
+    d.delayTime.value = dt;
+    const damp = ctx.createBiquadFilter();
+    damp.type = 'lowpass';
+    damp.frequency.value = 3200;
+    const fb = ctx.createGain();
+    fb.gain.value = Math.pow(10, (-3 * dt) / rt60);
+    pre.connect(d);
+    d.connect(damp).connect(fb).connect(d);
+    damp.connect(merger, 0, i % 2);
+  });
+  const out = ctx.createGain();
+  out.gain.value = 0.06; // matched by ear-level energy to the old convolution reverb
+  merger.connect(out);
+  return { input, out };
 }
 
 /** Owns the AudioContext, master chain and shared reverb. */
@@ -18,6 +37,8 @@ export class AudioEngine {
     this.music = new Music();
     this.ctx = null;
     this.preparing = this.sfx.prepare().catch((e) => console.warn('sfx prepare failed', e));
+    // the soundtrack renders in the background; the live sequencer covers until it is ready
+    this.musicReady = this.preparing.then(() => this.music.prerender());
   }
 
   /** Call from a user gesture (button press). */
@@ -40,13 +61,10 @@ export class AudioEngine {
     this.master = ctx.createGain();
     this.master.gain.value = 0.9;
     this.master.connect(comp).connect(ctx.destination);
-    const reverb = ctx.createConvolver();
-    reverb.buffer = makeImpulse(ctx);
-    const rvGain = ctx.createGain();
-    rvGain.gain.value = 0.5;
-    reverb.connect(rvGain).connect(this.master);
-    this.sfx.attach(ctx, this.master, reverb);
-    this.music.attach(ctx, this.master, reverb);
+    const reverb = makeReverb(ctx);
+    reverb.out.connect(this.master);
+    this.sfx.attach(ctx, this.master, reverb.input);
+    this.music.attach(ctx, this.master, reverb.input);
     if (ctx.state !== 'running') await ctx.resume();
     await this.preparing;
   }

@@ -725,12 +725,18 @@ export class Gyre {
       }
     }
     // cache armour transforms (arena-local -> ring-local) for shot tests
-    this._armor = [];
+    // (reuses the same objects every frame: per-frame garbage means GC pauses on the Quest)
+    if (!this._armorPool) {
+      this._armorPool = [[this.innerRing, RINGS.inner, 0.022], [this.midRing, RINGS.mid, 0.024], [this.outerRing, RINGS.outer, 0.028]]
+        .map(([ring, R, r]) => ({ ring, toLocal: new THREE.Matrix4(), R, r }));
+      this._armor = [];
+    }
+    this._armor.length = 0;
     const arenaInv = _m.copy(g.arena.matrixWorld).invert();
-    for (const [ring, R, r] of [[this.innerRing, RINGS.inner, 0.022], [this.midRing, RINGS.mid, 0.024], [this.outerRing, RINGS.outer, 0.028]]) {
-      if (!ring.visible || !ring.parent) continue;
-      const toLocal = new THREE.Matrix4().multiplyMatrices(arenaInv, ring.matrixWorld).invert();
-      this._armor.push({ toLocal, R, r });
+    for (const a of this._armorPool) {
+      if (!a.ring.visible || !a.ring.parent) continue;
+      a.toLocal.multiplyMatrices(arenaInv, a.ring.matrixWorld).invert();
+      this._armor.push(a);
     }
   }
 

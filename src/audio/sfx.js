@@ -1,6 +1,7 @@
 // Procedural sound design. Every effect is synthesised once into an AudioBuffer with an
-// OfflineAudioContext, then played through HRTF panners so explosions, lasers and the boss
-// are heard where they are in the room.
+// OfflineAudioContext, then played through equal-power panners so explosions, lasers and the
+// boss are heard where they are in the room. The very frequent small sounds (shots, hits,
+// grazes, coins) skip the panner and reverb entirely: two nodes each, rate-capped.
 
 const SR = 44100;
 
@@ -244,11 +245,13 @@ const RECIPES = {
 // Per-sound concurrency caps (default DEFAULT_LIMIT).
 const LIMITS = { shot: 3, hit: 3, tink: 2, graze: 2, coin: 3, enemyShot: 3, enemyShotBig: 2, pop: 4, boom: 3, laserHum: 3, laserCharge: 3, armorBreak: 2 };
 const DEFAULT_LIMIT = 3;
-// The Quest's audio thread is the bottleneck: cap total simultaneous voices, and only give the
-// expensive HRTF spatialiser to a few big sounds. Everything else uses cheap equal-power panning.
-const MAX_VOICES = 26;
-const MAX_HRTF = 5;
-const HRTF_NAMES = new Set(['boom', 'bigboom', 'armorBreak', 'rift', 'thrum', 'laserHum', 'death']);
+// The Quest's audio thread is the bottleneck: cap total simultaneous voices. (HRTF panning is
+// not used at all: it is the most expensive node there is.)
+const MAX_VOICES = 20;
+// Frequent, tiny sounds: no panner, no reverb send, and a floor on how often each can retrigger.
+const LEAN_GAP = { shot: 0.055, hit: 0.06, graze: 0.09, coin: 0.08, tink: 0.07, enemyShot: 0.1, ui: 0.04 };
+// Reverb sends are shared buses at fixed levels rather than a new gain node per sound.
+const REVERB_LEVELS = [0.15, 0.3, 0.5, 0.7, 0.9];
 // Sounds that may exceed the voice cap (rare, important).
 const PRIORITY = new Set(['bigboom', 'death', 'bomb', 'warning', 'powerup', 'extend', 'shieldBreak', 'grab', 'ui']);
 
@@ -260,7 +263,6 @@ export class Sfx {
     this.active = {};
     this.lastPlay = {};
     this.voices = 0;
-    this.hrtfVoices = 0;
     this.loops = new Set();
     this.volume = 1; // the player's EFFECTS volume (applied on the output node)
   }
@@ -292,10 +294,17 @@ export class Sfx {
     this.out.gain.value = this.volume;
     this.out.connect(destination);
     this.reverbSend = null;
+    this.sends = [];
     if (reverbSend) {
       this.reverbSend = ctx.createGain();
       this.reverbSend.gain.value = this.volume;
       this.reverbSend.connect(reverbSend);
+      this.sends = REVERB_LEVELS.map((lv) => {
+        const s = ctx.createGain();
+        s.gain.value = lv;
+        s.connect(this.reverbSend);
+        return s;
+      });
     }
     this.ready = true;
   }
@@ -328,9 +337,9 @@ export class Sfx {
     }
   }
 
-  _panner(pos, hrtf) {
+  _panner(pos) {
     const p = this.ctx.createPanner();
-    p.panningModel = hrtf ? 'HRTF' : 'equalpower';
+    p.panningModel = 'equalpower';
     p.distanceModel = 'inverse';
     p.refDistance = 0.6;
     p.maxDistance = 30;
@@ -348,7 +357,8 @@ export class Sfx {
   play(name, pos = null, opts = {}) {
     if (!this.ready || !this.buffers[name]) return null;
     const now = this.ctx.currentTime;
-    const minGap = opts.minGap ?? 0.025;
+    const lean = name in LEAN_GAP;
+    const minGap = Math.max(opts.minGap ?? 0.025, lean ? LEAN_GAP[name] : 0);
     if (this.lastPlay[name] && now - this.lastPlay[name] < minGap) return null;
     const limit = LIMITS[name] ?? DEFAULT_LIMIT;
     if ((this.active[name] || 0) >= limit) return null;
@@ -362,31 +372,29 @@ export class Sfx {
     g.gain.value = opts.vol ?? 1;
     src.connect(g);
     let tail = g;
-    const hrtf = !!pos && HRTF_NAMES.has(name) && this.hrtfVoices < MAX_HRTF;
-    if (pos) {
-      const p = this._panner(pos, hrtf);
+    if (pos && !lean) {
+      const p = this._panner(pos);
       g.connect(p);
       tail = p;
     }
     tail.connect(this.out);
-    const rv = opts.reverb ?? 0.15;
-    if (rv > 0 && this.reverbSend) {
-      const s = this.ctx.createGain();
-      s.gain.value = rv;
-      tail.connect(s).connect(this.reverbSend);
+    const rv = lean ? 0 : opts.reverb ?? 0.15;
+    if (rv > 0 && this.sends.length) {
+      // nearest shared send level
+      let best = 0;
+      for (let i = 1; i < REVERB_LEVELS.length; i++) if (Math.abs(REVERB_LEVELS[i] - rv) < Math.abs(REVERB_LEVELS[best] - rv)) best = i;
+      tail.connect(this.sends[best]);
     }
     this.active[name] = (this.active[name] || 0) + 1;
     this.voices++;
-    if (hrtf) this.hrtfVoices++;
     src.onended = () => {
       this.active[name]--;
       this.voices--;
-      if (hrtf) this.hrtfVoices--;
       try { src.disconnect(); g.disconnect(); tail.disconnect(); } catch { /* already gone */ }
     };
     if (opts.loop) src.loop = true;
     src.start(now + (opts.delay ?? 0));
-    return { src, gain: g, panner: pos ? tail : null };
+    return { src, gain: g, panner: tail !== g ? tail : null };
   }
 
   /**

@@ -1,5 +1,12 @@
 // A small synthwave sequencer. Songs are authored as chord progressions plus a lead melody,
 // and arrangements turn layers on and off as the fight intensifies.
+//
+// Playing the sequencer live means building a dozen audio nodes per note, scheduled from the
+// render loop. On the Quest that churn (plus frame hitches delaying the scheduler) is what made
+// the music crackle late in the boss fight. So at load each song is rendered once, offline, into
+// one looping multichannel buffer with a channel per layer ("stems"). Gameplay then plays a
+// single looping source per song and only moves gain knobs. The live sequencer remains as the
+// fallback for the first seconds before the stems are ready, and for jingles.
 
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
@@ -57,6 +64,65 @@ export const ARRANGEMENTS = {
   bossRage: { arp: 0.8, hat: 1, bass: 1, kick: 1, snare: 1, lead: 1, toms: 0.9, pad: 0.3 },
 };
 
+const STEMS = ['pad', 'arp', 'bass', 'kick', 'snare', 'hat', 'lead', 'toms'];
+const DUCK_CH = STEMS.length; // extra channel: the kick's sidechain envelope, stored as (gain - 1)
+const STEM_RATE = 32000;
+// Layers that pump with the kick, and how much of each layer feeds the reverb.
+const DUCKED = new Set(['pad', 'bass']);
+const REVERB_SEND = { pad: 1, lead: 1, snare: 0.35 };
+const LAYER_GLIDE = 0.2; // seconds (time constant) for arrangement changes
+
+const isKick = (song, bar, s) => s % 4 === 0 || (song === BOSS && s === 14 && bar % 2 === 1);
+
+/**
+ * Renders one song loop to a buffer with one channel per layer, plus the duck envelope.
+ * The loop is rendered with its last bar played first as a pre-roll, which is then cut away:
+ * delay echoes and pad releases from the end of the loop are already ringing at its start,
+ * so it loops without a seam.
+ */
+async function renderSong(song) {
+  const bars = song.lead.length;
+  const sixteenth = 60 / song.bpm / 4;
+  const barLen = sixteenth * 16;
+  const pre = Math.round(barLen * STEM_RATE);
+  const len = Math.round(bars * barLen * STEM_RATE);
+  const off = new OfflineAudioContext(STEMS.length, pre + len, STEM_RATE);
+  off.destination.channelInterpretation = 'discrete';
+  const merger = off.createChannelMerger(STEMS.length);
+  merger.connect(off.destination);
+  STEMS.forEach((name, ch) => {
+    const tap = off.createGain();
+    tap.connect(merger, 0, ch);
+    const m = new Music();
+    m.attach(off, tap, null);
+    m.bus.gain.value = 1; // levels are applied at playback
+    m.song = song;
+    m._setDelayTime();
+    m.layers = { [name]: 1 };
+    for (let i = 0; i < (bars + 1) * 16; i++) {
+      m.bar = i < 16 ? bars - 1 : Math.floor(i / 16) - 1;
+      m.step = i % 16;
+      m._scheduleStep(i * sixteenth);
+    }
+  });
+  const rendered = await off.startRendering();
+  const buffer = new AudioBuffer({ numberOfChannels: STEMS.length + 1, length: len, sampleRate: STEM_RATE });
+  for (let ch = 0; ch < STEMS.length; ch++) buffer.copyToChannel(rendered.getChannelData(ch).subarray(pre, pre + len), ch);
+  // Sidechain: on every kick the ducked layers drop to 0.35 and recover over three 16ths
+  // (or until the next kick), exactly like the live sequencer's automation.
+  const duck = buffer.getChannelData(DUCK_CH);
+  const kicks = [];
+  for (let b = 0; b < bars; b++) for (let s = 0; s < 16; s++) if (isKick(song, b, s)) kicks.push((b * 16 + s) * sixteenth);
+  kicks.push(bars * barLen);
+  for (let k = 0; k < kicks.length - 1; k++) {
+    const a = Math.round(kicks[k] * STEM_RATE);
+    const z = Math.min(len, Math.round(kicks[k + 1] * STEM_RATE));
+    const ramp = sixteenth * 3 * STEM_RATE;
+    for (let i = a; i < z; i++) duck[i] = Math.min(0, -0.65 + 0.65 * ((i - a) / ramp));
+  }
+  return { buffer, barLen, bars, sixteenth };
+}
+
 // Internal mix level of the music bus; the player's MUSIC slider scales on top of this,
 // so 1.0 on the slider is the loudest the music gets.
 const BUS_LEVEL = 0.45;
@@ -73,6 +139,23 @@ export class Music {
     this.bar = 0;
     this.nextTime = 0;
     this.playing = false;
+    this.arrangement = '';
+    this.stems = null; // { stage, boss } once rendered
+    this.player = null; // the stem player currently (or about to be) heard
+    this.players = new Set();
+  }
+
+  /** Renders the songs into stems. Needs no user gesture; call once at load. */
+  prerender() {
+    if (!this._prerender) {
+      this._prerender = (async () => {
+        if (typeof OfflineAudioContext === 'undefined' || typeof AudioBuffer === 'undefined') return;
+        const stage = await renderSong(STAGE);
+        const boss = await renderSong(BOSS);
+        this.stems = { stage, boss };
+      })().catch((e) => console.warn('music prerender failed; using the live sequencer', e));
+    }
+    return this._prerender;
   }
 
   attach(ctx, destination, reverbSend) {
@@ -120,9 +203,22 @@ export class Music {
   }
 
   play(songName = 'stage', arrangement = 'title') {
-    const song = songName === 'boss' ? BOSS : STAGE;
+    const key = songName === 'boss' ? 'boss' : 'stage';
+    const song = key === 'boss' ? BOSS : STAGE;
     this.arrange(arrangement);
     if (!this.ctx) return;
+    if (this.stems) {
+      const now = this.ctx.currentTime;
+      if (!this.playing || !this.player) {
+        this.playing = true;
+        this.song = song;
+        this.pendingSong = null;
+        this._startPlayer(key, now + 0.06, 0, 0);
+      } else if (this.player.key !== key) {
+        this._switchPlayer(key);
+      }
+      return;
+    }
     if (!this.playing) {
       this.song = song;
       this._setDelayTime();
@@ -136,16 +232,117 @@ export class Music {
   }
 
   arrange(name) {
+    if (name === this.arrangement) return;
+    this.arrangement = name;
     this.targetLayers = ARRANGEMENTS[name] || {};
+    if (this.ctx) for (const p of this.players) this._glide(p, this.ctx.currentTime, LAYER_GLIDE);
   }
 
   stop() {
     this.playing = false;
+    if (this.ctx) for (const p of [...this.players]) this._fadeOut(p, this.ctx.currentTime, 0.1);
+    this.player = null;
+  }
+
+  // ---------------------------------------------------------------- stem playback
+  // One looping source per song: source -> splitter -> a gain per layer -> bus. The duck channel
+  // drives the ducked layers' gain directly, so the sidechain pump costs nothing per beat.
+
+  _startPlayer(key, when, offset, glide) {
+    const c = this.ctx;
+    const st = this.stems[key];
+    const p = { key, t0: when - offset, barLen: st.barLen, gains: {}, ended: false };
+    p.src = c.createBufferSource();
+    p.src.buffer = st.buffer;
+    p.src.loop = true;
+    const split = c.createChannelSplitter(STEMS.length + 1);
+    p.src.connect(split);
+    p.out = c.createGain();
+    p.out.connect(this.bus);
+    p.duck = c.createGain();
+    p.duck.connect(p.out);
+    p.depth = c.createGain();
+    p.depth.gain.value = 0;
+    split.connect(p.depth, DUCK_CH);
+    p.depth.connect(p.duck.gain);
+    if (this.reverbSend) {
+      p.rv = c.createGain();
+      p.rv.connect(this.reverbSend);
+    }
+    STEMS.forEach((name, ch) => {
+      const g = c.createGain();
+      g.gain.value = glide ? this.layers[name] || 0 : this.targetLayers[name] || 0;
+      split.connect(g, ch);
+      g.connect(DUCKED.has(name) ? p.duck : p.out);
+      if (p.rv && REVERB_SEND[name]) {
+        const s = c.createGain();
+        s.gain.value = REVERB_SEND[name];
+        g.connect(s).connect(p.rv);
+      }
+      p.gains[name] = g;
+    });
+    this._glide(p, when, glide);
+    p.src.onended = () => {
+      p.ended = true;
+      this.players.delete(p);
+      try { p.src.disconnect(); p.out.disconnect(); if (p.rv) p.rv.disconnect(); } catch { /* gone */ }
+    };
+    p.src.start(when, offset);
+    this.players.add(p);
+    this.player = p;
+    return p;
+  }
+
+  /** Moves a player's layer gains to the current arrangement. */
+  _glide(p, t, tc) {
+    const T = this.targetLayers;
+    for (const name of STEMS) {
+      const param = p.gains[name].gain;
+      if (tc > 0) param.setTargetAtTime(T[name] || 0, t, tc);
+      else param.setValueAtTime(T[name] || 0, t);
+    }
+    // the kick pumps the pads and bass only while the kick is playing
+    const d = T.kick > 0.01 ? 1 : 0;
+    if (tc > 0) p.depth.gain.setTargetAtTime(d, t, 0.05);
+    else p.depth.gain.setValueAtTime(d, t);
+  }
+
+  _fadeOut(p, t, tc) {
+    p.out.gain.setTargetAtTime(0, t, tc);
+    if (p.rv) p.rv.gain.setTargetAtTime(0, t, tc);
+    try { p.src.stop(t + tc * 8); } catch { /* already stopped */ }
+    if (this.player === p) this.player = null;
+  }
+
+  /** Changes song on the current song's next bar line. */
+  _switchPlayer(key) {
+    const cur = this.player;
+    const now = this.ctx.currentTime;
+    const when = cur.t0 + Math.max(0, Math.ceil((now + 0.05 - cur.t0) / cur.barLen)) * cur.barLen;
+    for (const p of [...this.players]) this._fadeOut(p, Math.max(now, when), 0.06);
+    this.song = key === 'boss' ? BOSS : STAGE;
+    this._startPlayer(key, Math.max(now + 0.02, when), 0, 0);
+  }
+
+  /** The stems finished rendering while the live sequencer was playing: take over seamlessly. */
+  _handoff() {
+    const song = this.pendingSong || this.song;
+    const key = song === BOSS ? 'boss' : 'stage';
+    const st = this.stems[key];
+    let offset = 0;
+    if (!this.pendingSong) offset = ((this.bar % st.bars) * 16 + this.step) * st.sixteenth;
+    this.song = song;
+    this.pendingSong = null;
+    const when = Math.max(this.nextTime, this.ctx.currentTime + 0.02);
+    this._startPlayer(key, when, offset, LAYER_GLIDE);
   }
 
   /** Muffles the music (used while paused or during slow motion). Only touches the bus. */
   setMuffle(amount) {
     if (!this.ctx) return;
+    // called every frame: only touch the params when the amount actually changes
+    if (this._muffle !== undefined && Math.abs(amount - this._muffle) < 0.005) return;
+    this._muffle = amount;
     const f = 20000 * Math.pow(1 - amount, 3) + 350;
     this.filter.frequency.setTargetAtTime(f, this.ctx.currentTime, 0.15);
     this.bus.gain.setTargetAtTime(BUS_LEVEL * (1 - amount * 0.45), this.ctx.currentTime, 0.15);
@@ -181,6 +378,11 @@ export class Music {
 
   tick() {
     if (!this.ctx || !this.playing) return;
+    if (this.stems) {
+      // stem playback needs no per-frame work; just take over from the live sequencer once
+      if (!this.player) this._handoff();
+      return;
+    }
     // Smoothly move layer gains towards targets once per tick
     const all = ['pad', 'arp', 'bass', 'kick', 'snare', 'hat', 'lead', 'toms'];
     for (const k of all) {
