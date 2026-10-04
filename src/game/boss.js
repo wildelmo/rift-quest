@@ -3,8 +3,7 @@ import { difficulty } from './difficulty.js';
 import { clamp, easeInOutCubic, easeOutBack, inAperture, rand, segmentSphere, torusDistance, TAU } from '../engine/math.js';
 import { gyreCore, gyreEmitter, gyreFins, gyrePod, gyreRing, gyreShell, PALETTE, flareTexture, setFlash } from './models.js';
 import { cone, dirTo, fan, normalize, shell } from './patterns.js';
-import { spawnMine } from './enemies.js';
-import { minePos } from './stage.js';
+import { spawnEscort, spawnMine } from './enemies.js';
 import { COLORS } from './fx.js';
 
 // THE GYRE - a living gyroscope that tears through the wall.
@@ -13,10 +12,15 @@ import { COLORS } from './fx.js';
 //   Phase III "Heart"   : the shell opens a single aperture. The core can only be hit by flying
 //                         into the aperture's line of sight - the eye of a hollow cone of fire.
 
-export const BOSS_HP = { pod: 170, emitter: 300, core: 1100 };
+export const BOSS_HP = { pod: 200, emitter: 340, core: 1100 };
 export const APERTURE_HIT_ANGLE = 0.25;
 export const EYE_CONE = 0.16;
 export const RINGS = { inner: 0.31, mid: 0.48, outer: 0.68, shell: 0.2 };
+
+// Where escorts hold station: the Gyre's flanks, between it and the player (arena-local).
+// Out to the sides and up, clear of the Gyre's silhouette, so they read as separate fighters.
+const ESCORT_SLOTS = [[-0.62, 0.32, -0.52], [0.62, 0.32, -0.52], [-0.66, -0.04, -0.45], [0.66, -0.04, -0.45], [-0.4, 0.55, -0.58], [0.4, 0.55, -0.58]]
+  .map(([x, y, z]) => new THREE.Vector3(x, y, z));
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -28,7 +32,7 @@ class Part {
   constructor(boss, object, { hp, radius, name, score, kind }) {
     this.boss = boss;
     this.object = object;
-    hp *= difficulty().enemyHp;
+    hp *= difficulty().bossHp;
     this.hp = hp;
     this.maxHp = hp;
     this.radius = radius;
@@ -64,9 +68,11 @@ class Part {
 
   damage(dmg, point) {
     if (!this.alive || !this.vulnerable) return;
+    const before = this.hp;
     this.hp -= dmg;
     this.flash = 0.05;
     this.boss.game.onEnemyDamaged(this, dmg, point);
+    if (this.kind !== 'core' && before > this.maxHp * 0.5 && this.hp <= this.maxHp * 0.5 && this.hp > 0) this.boss.onPartCracked(this);
     if (this.hp <= 0) {
       this.hp = 0;
       this.alive = false;
@@ -209,6 +215,10 @@ export class Gyre {
     this.rage = false;
     this.final = false;
     this.ringMats = new Map();
+    this.escorts = new Set();
+    this.escortSlots = new Set(); // reserved stations
+    this.escortCount = 0;
+    this.escortDown = -Infinity;
   }
 
   get rigs() {
@@ -302,6 +312,7 @@ export class Gyre {
     this.run(this._crownPods());
     this.run(this._crownCore());
     this.run(this._mines(7, 2));
+    this.run(this._escortWing());
   }
 
   *_crownPods() {
@@ -367,9 +378,83 @@ export class Gyre {
   *_mines(every, beams) {
     yield 3;
     while (true) {
-      spawnMine(this.game, minePos(this.game), { beams: this.rage ? beams + 1 : beams });
-      yield every * (this.rage ? 0.75 : 1) * rand(0.85, 1.15);
+      this._spawnMine(this.rage ? beams + 1 : beams);
+      // easy spaces them out; normal and hard keep the authored rate
+      yield every * (this.rage ? 0.75 : 1) * rand(0.85, 1.15) / Math.min(1, difficulty().pressure / 0.72);
     }
+  }
+
+  /**
+   * The Gyre's mines are armoured and reach across the play space. They warp in level with the
+   * ship and sweep their blades in the plane facing you, so you can't outrun them: thread the
+   * gap between the blades, pull clear of the plane, or shoot the mine first.
+   */
+  _spawnMine(beams) {
+    const g = this.game;
+    const s = g.ship.pos;
+    const axis = _v2.copy(g.headLocal).sub(s).normalize();
+    const up = Math.abs(axis.y) > 0.9 ? _v3.set(1, 0, 0) : _v3.set(0, 1, 0);
+    const u = new THREE.Vector3().crossVectors(axis, up).normalize();
+    const w = new THREE.Vector3().crossVectors(axis, u);
+    const p = new THREE.Vector3();
+    for (let i = 0; i < 12; i++) {
+      const a = rand(0, TAU), r = rand(0.17, 0.3);
+      p.copy(s).addScaledVector(u, Math.cos(a) * r).addScaledVector(w, Math.sin(a) * r * 0.8);
+      p.x = clamp(p.x, -0.48, 0.48);
+      p.y = clamp(p.y, -0.22, 0.4);
+      p.addScaledVector(axis, -p.clone().sub(s).dot(axis)); // back into the ship's plane
+      if (p.distanceTo(s) > 0.15) break;
+    }
+    const d = difficulty();
+    spawnMine(g, p, { beams, length: d.mineReach, depth: 0.045, axis, hp: 10, scale: 1.3 });
+  }
+
+  /** Escorts fly in from the rift and stay for the fight; losses are replaced after a pause. */
+  *_escortWing() {
+    const g = this.game;
+    yield this.escortCount ? 2 : 3.5;
+    const respawn = { easy: 11, normal: 7, hard: 5 }[difficulty().key] ?? 7;
+    while (true) {
+      const want = difficulty().escorts;
+      if (this.escorts.size < want && g.time - this.escortDown > respawn) {
+        this._spawnEscort();
+        yield 1.4;
+      } else yield 0.5;
+    }
+  }
+
+  _spawnEscort() {
+    const g = this.game;
+    const from = g.room.rifts.boss.mouth(new THREE.Vector3(), 0.05).add(_v.set(rand(-0.3, 0.3), rand(-0.2, 0.2), 0));
+    const n = this.escortCount++;
+    const e = spawnEscort(g, from, {
+      style: n % 3 === 1 ? 'warden' : 'picket',
+      drop: n % 4 === 3,
+      station: () => this._takeSlot(),
+      release: (p) => this.escortSlots.delete(p),
+      active: () => this.phase === 'crown' || this.phase === 'lattice' || this.phase === 'heart',
+      onGone: (en) => { if (this.escorts.delete(en)) this.escortDown = g.time; },
+    });
+    this.escorts.add(e);
+    g.sfx.play('rift', g.worldPos(from), { vol: 0.5, rate: 1.4 });
+  }
+
+  _takeSlot() {
+    const free = ESCORT_SLOTS.filter((p) => !this.escortSlots.has(p));
+    const p = free.length ? free[Math.floor(Math.random() * free.length)] : ESCORT_SLOTS[Math.floor(Math.random() * ESCORT_SLOTS.length)];
+    this.escortSlots.add(p);
+    return p;
+  }
+
+  /** A pod or emitter at half health: its armour cracks open, sparking until it is destroyed. */
+  onPartCracked(part) {
+    const g = this.game;
+    part.cracked = true;
+    g.fx.sparks(part.pos, 26, COLORS.amber, 0.9);
+    g.fx.flash(part.pos, 0.09, COLORS.orange, 0.15);
+    g.sfx.play('armorBreak', g.worldPos(part.pos), { vol: 0.55, rate: 1.5 });
+    g.haptic(0.35, 50);
+    part.model.scale.setScalar(1.35);
   }
 
   _startLattice() {
@@ -383,6 +468,7 @@ export class Gyre {
       boss.run(boss._latticeLasers());
       boss.run(boss._latticeBursts());
       boss.run(boss._mines(9, 2));
+      boss.run(boss._escortWing());
     })(this));
   }
 
@@ -493,6 +579,7 @@ export class Gyre {
       boss.run(boss._heartEye());
       boss.run(boss._heartVents());
       boss.run(boss._mines(6.5, 2));
+      boss.run(boss._escortWing());
     })(this));
   }
 
@@ -593,6 +680,7 @@ export class Gyre {
     this.phase = 'dying';
     this.eye.visible = false;
     g.lasers.clear();
+    for (const e of [...this.escorts]) e.kill();
     g.onBossDying();
     this.run((function* (boss) {
       const pts = [];
@@ -713,9 +801,10 @@ export class Gyre {
     this.arcs.visible = exposed && this.capOff;
     if (this.arcs.visible) this._updateArcs();
 
-    // sync weak point positions + hit flashes
+    // sync weak point positions + hit flashes; cracked armour sparks and smokes
     for (const p of this.parts) {
       p.sync(dt);
+      if (p.cracked && p.alive && Math.random() < dt * 7) g.fx.sparks(p.pos, 2, Math.random() < 0.5 ? COLORS.amber : COLORS.orange, 0.5, { lifeScale: 0.7 });
       if (p.flash > 0) {
         p.flash -= dt;
         const on = p.flash > 0;

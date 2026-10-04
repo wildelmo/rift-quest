@@ -48,6 +48,7 @@ export class Enemy {
     this.hull = model.userData.hull;
     this.jink = null; // { amp, freq } erratic wobble layered on top of the scripted path
     this.jinkOff = new THREE.Vector3();
+    this.maxLife = 60;
     game.enemies.push(this);
   }
 
@@ -121,7 +122,7 @@ export class Enemy {
       if (this.hull) setFlash(this.hull.material, this.flash > 0 ? 0.85 : 0);
     }
     this.tick && this.tick(dt);
-    if (this.t > 60) this.remove(); // safety net
+    if (this.t > this.maxLife) this.remove(); // safety net
   }
 
   /** Default collision against a shot travelling from (px,py,pz) to (x,y,z). */
@@ -392,10 +393,14 @@ export function spawnMine(game, pos, opts = {}) {
   const spin = (opts.spin ?? rand(1.1, 1.9)) * (Math.random() < 0.5 ? -1 : 1);
   const warn = opts.warn ?? 1.0, fire = opts.fire ?? 4.0;
   const length = opts.length ?? 0.5;
+  const depth = opts.depth ?? 0;
+  const size = opts.scale ?? 1;
+  e.radius *= size;
+  const fixedAxis = opts.axis ? opts.axis.clone().normalize() : null; // beam-plane normal, fixed at spawn
   let t = 0;
   e.tick = (dt) => {
     t += dt;
-    model.scale.setScalar(Math.min(1, t / 0.3));
+    model.scale.setScalar(Math.min(1, t / 0.3) * size);
     model.rotation.z += dt * spin * (t > warn ? 1 : 0.3);
     const eyeHull = model.userData.glow;
     if (eyeHull) eyeHull.visible = t > warn || Math.floor(t * 10) % 2 === 0; // blinking while arming
@@ -409,7 +414,8 @@ export function spawnMine(game, pos, opts = {}) {
     const phase0 = (i / beams) * TAU + rand(0, TAU / beams);
     let ang = phase0;
     game.lasers.add((l, dt) => {
-      axis.copy(game.headLocal).sub(e.pos).normalize();
+      if (fixedAxis) axis.copy(fixedAxis);
+      else axis.copy(game.headLocal).sub(e.pos).normalize();
       up.set(0, 1, 0);
       if (Math.abs(axis.y) > 0.9) up.set(1, 0, 0);
       base.crossVectors(axis, up).normalize();
@@ -418,7 +424,7 @@ export function spawnMine(game, pos, opts = {}) {
       l.origin.copy(e.pos);
       l.dir.copy(base).multiplyScalar(Math.cos(ang)).addScaledVector(tmp, Math.sin(ang)).normalize();
       l.origin.addScaledVector(l.dir, 0.02);
-    }, { warn, fire, width: 0.013, length, owner: e, color: [1, 0.25, 0.15], hum: i === 0 ? { sfx: game.sfx, name: 'laserHum', vol: 0.3 } : null });
+    }, { warn, fire, width: 0.013, length, depth, owner: e, color: [1, 0.25, 0.15], hum: i === 0 ? { sfx: game.sfx, name: 'laserHum', vol: 0.3 } : null });
   }
   e.run((function* () {
     yield warn;
@@ -497,6 +503,97 @@ export function spawnWraith(game, from, opts = {}) {
     }
     e.faceVel = true;
     e.moveTo(e.pos.clone().add(new THREE.Vector3(Math.sign(e.pos.x || 1) * 1.5, 0.5, -1.2)), 1.2, (x) => x * x, () => e.remove());
+  })());
+  return e;
+}
+
+// ------------------------------------------------------------------ escort (boss-fight wingman)
+
+/**
+ * Joins the boss fight through the boss rift and holds a station on the Gyre's flank for the rest
+ * of the fight, drifting and firing until it is shot down. It never leaves on its own.
+ *   'warden'  a small bloom turret: short rotating three-arm bursts
+ *   'picket'  a fighter: aimed three-round bursts and the odd fan, changing station every few volleys
+ * opts.station() reserves and returns a free station, opts.release(p) frees it again,
+ * opts.active() says whether to fire right now, opts.onGone() runs when it dies or is removed.
+ */
+export function spawnEscort(game, from, opts = {}) {
+  const warden = opts.style === 'warden';
+  const model = warden ? buildBloom() : buildDart();
+  const e = new Enemy(game, model, {
+    hp: opts.hp ?? (warden ? 16 : 10), radius: warden ? 0.034 : 0.028,
+    score: warden ? 800 : 600, kind: 'escort', explodeScale: warden ? 2 : 1.5,
+  });
+  model.scale.setScalar(warden ? 0.62 : 1.15);
+  e.maxLife = Infinity;
+  e.pos.copy(from);
+  e.dropCapsule = opts.drop ?? false;
+  e.cancelRadius = 0.15;
+  e.faceVel = false;
+  e.faceShip = warden;
+  let slot = opts.station();
+  const home = slot.clone();
+  e.onRemove = () => { opts.release(slot); opts.onGone && opts.onGone(e); };
+  const petals = model.userData.petals;
+  let spin = 1;
+  let tt = rand(0, TAU);
+  const target = new THREE.Vector3();
+  e.tick = (dt) => {
+    if (petals) petals.rotation.z += dt * spin;
+    if (!warden) {
+      // nose (-Z) toward the ship: it is visibly aiming at you
+      _m.lookAt(e.pos, game.ship.pos, _up);
+      _q.setFromRotationMatrix(_m);
+      e.group.quaternion.slerp(_q, 1 - Math.exp(-8 * dt));
+    }
+  };
+  // fly in from the rift, then hang about the station on a slow drift
+  let arrived = false;
+  e.mover = (dt) => {
+    tt += dt;
+    target.set(home.x + Math.sin(tt * 0.7) * 0.05, home.y + Math.sin(tt * 1.1) * 0.035, home.z + Math.sin(tt * 0.45) * 0.03);
+    e.pos.lerp(target, 1 - Math.exp(-(arrived ? 2.5 : 1.6) * dt));
+  };
+  e.run((function* () {
+    yield 1.8;
+    arrived = true;
+    let k = 0;
+    while (true) {
+      if (game.state !== 'playing' || (opts.active && !opts.active())) { yield 0.4; continue; }
+      if (warden) {
+        spin = 4;
+        let ph = rand(0, TAU);
+        game.sfx.play('enemyShot', game.worldPos(e.pos), { vol: 0.45 });
+        for (let i = 0; i < 10; i++) {
+          const aim = dirTo(e.pos, game.ship.pos);
+          for (const d of cone(aim, 3, 0.32, ph)) game.bullets.spawn(e.pos.x, e.pos.y, e.pos.z, d.x * 0.36, d.y * 0.36, d.z * 0.36, 'small');
+          ph += 0.42;
+          yield 0.12;
+        }
+        spin = 1;
+        yield rand(2.0, 2.8);
+      } else {
+        if (k % 3 === 2) {
+          const d = dirTo(e.pos, game.ship.pos);
+          for (const f of fan(d, 5, 0.6, rand(0, Math.PI))) game.bullets.spawn(e.pos.x, e.pos.y, e.pos.z, f.x * 0.42, f.y * 0.42, f.z * 0.42, 'rice');
+          game.sfx.play('enemyShot', game.worldPos(e.pos), { vol: 0.5 });
+        } else {
+          for (let i = 0; i < 3; i++) {
+            e.shootAt(0.5, 'amber');
+            yield 0.11;
+          }
+        }
+        yield rand(1.5, 2.1);
+        if (k % 3 === 2) {
+          // change station
+          const old = slot;
+          slot = opts.station();
+          opts.release(old);
+          home.copy(slot);
+        }
+      }
+      k++;
+    }
   })());
   return e;
 }

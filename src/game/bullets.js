@@ -338,6 +338,7 @@ export class Lasers {
     const l = {
       origin: new THREE.Vector3(), dir: new THREE.Vector3(0, 0, 1), driver,
       warn: opts.warn ?? 0.8, fire: opts.fire ?? 1.5, fade: 0.25, width: opts.width ?? 0.03, length: opts.length ?? 4,
+      depth: opts.depth ?? 0, // extra hit tolerance along the line of sight: the beam acts as a blade seen edge-on
       color: new THREE.Color(...(opts.color || [1, 0.15, 0.35])), t: 0, state: 'warn', mesh: this._mesh(), owner: opts.owner || null,
       onFire: opts.onFire || null, grazeTimer: 0, dead: false,
       hum: opts.hum || null, // { sfx, name, vol }: a looping sound owned by this beam
@@ -378,7 +379,7 @@ export class Lasers {
       if (l.state === 'fire' && ship.active) {
         const ax = l.origin.x, ay = l.origin.y, az = l.origin.z;
         const bx = ax + l.dir.x * l.length, by = ay + l.dir.y * l.length, bz = az + l.dir.z * l.length;
-        const d2 = distSqPointSegment(ship.x, ship.y, ship.z, ax, ay, az, bx, by, bz);
+        const d2 = l.depth ? this._bladeDistSq(l, ship, ax, ay, az, bx, by, bz) : distSqPointSegment(ship.x, ship.y, ship.z, ax, ay, az, bx, by, bz);
         const ramp = Math.min(1, l.t / 0.12);
         const hr = l.width * 0.42 * ramp + ship.radius;
         if (ship.vulnerable && d2 < hr * hr && ramp >= 1) cb.onHit(l);
@@ -394,6 +395,27 @@ export class Lasers {
       this.items[w++] = l;
     }
     this.items.length = w;
+  }
+
+  /**
+   * Squared distance from the ship to a beam that is l.depth thick along the line of sight.
+   * What covers the ship from the player's eye is what hits it, so a sweeping blade can't be
+   * slipped by a hair's breadth of depth the player can't judge.
+   */
+  _bladeDistSq(l, ship, ax, ay, az, bx, by, bz) {
+    const dx = bx - ax, dy = by - ay, dz = bz - az;
+    const len2 = dx * dx + dy * dy + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((ship.x - ax) * dx + (ship.y - ay) * dy + (ship.z - az) * dz) / len2));
+    const cx = ax + dx * t, cy = ay + dy * t, cz = az + dz * t;
+    const rx = ship.x - cx, ry = ship.y - cy, rz = ship.z - cz;
+    const h = this.headPos;
+    let vx = cx - h.x, vy = cy - h.y, vz = cz - h.z;
+    const vl = Math.hypot(vx, vy, vz) || 1;
+    vx /= vl; vy /= vl; vz /= vl;
+    const along = rx * vx + ry * vy + rz * vz;
+    const perp2 = Math.max(0, rx * rx + ry * ry + rz * rz - along * along);
+    const over = Math.max(0, Math.abs(along) - l.depth);
+    return perp2 + over * over;
   }
 
   render() {
