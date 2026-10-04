@@ -250,7 +250,7 @@ export class Sfx {
     this.ready = false;
     this.active = {};
     this.lastPlay = {};
-    this.volume = 1;
+    this.volume = 1; // the player's EFFECTS volume (applied on the output node)
   }
 
   /** Synthesises every buffer. Safe to call before a user gesture. */
@@ -274,11 +274,27 @@ export class Sfx {
   /** Must be called from a user gesture. */
   attach(ctx, destination, reverbSend) {
     this.ctx = ctx;
+    // Effects output: every effect (and its reverb send) goes through here, so the EFFECTS
+    // slider also reaches sounds that are already playing, such as loops.
     this.out = ctx.createGain();
-    this.out.gain.value = 0.9;
+    this.out.gain.value = this.volume;
     this.out.connect(destination);
-    this.reverbSend = reverbSend;
+    this.reverbSend = null;
+    if (reverbSend) {
+      this.reverbSend = ctx.createGain();
+      this.reverbSend.gain.value = this.volume;
+      this.reverbSend.connect(reverbSend);
+    }
     this.ready = true;
+  }
+
+  /** The player's effects volume, 0..1 (0 silences everything). Safe to call before attach. */
+  setVolume(v) {
+    this.volume = Math.min(1, Math.max(0, v));
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.out.gain.setTargetAtTime(this.volume, t, 0.04);
+    if (this.reverbSend) this.reverbSend.gain.setTargetAtTime(this.volume, t, 0.04);
   }
 
   updateListener(m) {
@@ -330,7 +346,7 @@ export class Sfx {
     const jitter = opts.rateJitter ?? 0.04;
     src.playbackRate.value = (opts.rate ?? 1) * (1 + (Math.random() * 2 - 1) * jitter);
     const g = this.ctx.createGain();
-    g.gain.value = (opts.vol ?? 1) * this.volume;
+    g.gain.value = opts.vol ?? 1;
     src.connect(g);
     let tail = g;
     if (pos) {
@@ -360,7 +376,7 @@ export class Sfx {
     const h = this.play(name, pos, { loop: true, vol: 0, rateJitter: 0, minGap: 0 });
     if (!h) return null;
     const ctx = this.ctx;
-    h.gain.gain.setTargetAtTime(vol * this.volume, ctx.currentTime, 0.05);
+    h.gain.gain.setTargetAtTime(vol, ctx.currentTime, 0.05);
     return {
       setPos(p) {
         if (!h.panner) return;

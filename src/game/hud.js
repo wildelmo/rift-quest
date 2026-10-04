@@ -250,7 +250,7 @@ export class Hud {
       backing(ctx, w, h * 0.5, 0.55, '#ffd23a');
       drawText(ctx, 'PAUSED', w / 2, h * 0.14, { size: 100, glow: '#ffd23a', spacing: 0.3 });
       drawText(ctx, 'grab the ship to resume', w / 2, h * 0.3, { size: 40, italic: false, weight: 700, color: '#fff2c4', glow: null, spacing: 0.08 });
-      drawText(ctx, 'thumbstick click: recentre arena  ·  B/Y: sound on/off', w / 2, h * 0.4, { size: 26, italic: false, weight: 600, color: '#cfe8ff', glow: null, spacing: 0.04 });
+      drawText(ctx, 'thumbstick click: recentre arena  ·  B/Y: menu', w / 2, h * 0.4, { size: 26, italic: false, weight: 600, color: '#cfe8ff', glow: null, spacing: 0.04 });
     } else if (this.panelKind === 'results' || this.panelKind === 'gameover') {
       const win = this.panelKind === 'results';
       backing(ctx, w, h, 0.62, win ? '#ffd23a' : '#ff3d6a');
