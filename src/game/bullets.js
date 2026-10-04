@@ -6,16 +6,17 @@ import { COLORS } from './fx.js';
 // Enemy bullets, lasers and the score stars that cancelled bullets turn into.
 
 export const BULLET = {
-  // [sprite size (quad width incl. halo), hit radius, colour]. The lit ball is ~56% of the sprite.
+  // [sprite size (quad width incl. halo), hit radius, colour]. The lit ball is ~56% of the sprite,
+  // and the hit radius matches the visible ball so what you see is what hits you.
   // Different patterns use different looks so overlapping streams stay readable.
-  small: [0.026, 0.0055, COLORS.red],
-  medium: [0.036, 0.0078, COLORS.magenta],
-  large: [0.06, 0.013, COLORS.violet],
-  huge: [0.1, 0.022, COLORS.red],
-  rice: [0.022, 0.005, COLORS.orange],
-  amber: [0.028, 0.006, COLORS.orange],
-  red: [0.03, 0.0065, COLORS.red],
-  violet: [0.036, 0.0078, COLORS.violet],
+  small: [0.016, 0.0042, COLORS.red],
+  medium: [0.02, 0.0054, COLORS.magenta],
+  large: [0.03, 0.0082, COLORS.violet],
+  huge: [0.05, 0.0135, COLORS.red],
+  rice: [0.014, 0.0038, COLORS.orange],
+  amber: [0.016, 0.0044, COLORS.orange],
+  red: [0.017, 0.0046, COLORS.red],
+  violet: [0.02, 0.0054, COLORS.violet],
 };
 
 /** Global bullet speed multiplier (difficulty knob). */
